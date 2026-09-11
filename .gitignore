@@ -1,1 +1,8 @@
 /.agents
+__pycache__/
+*.pyc
+
+# Sensitive WiFi / API credentials
+secrets.py
+src/secrets.py
+**/secrets.py
