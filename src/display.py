@@ -68,6 +68,36 @@ class OLEDDisplay:
         except Exception as e:
             print(f"[display] Splash error: {e}")
 
+    def show_message(self, text):
+        """Displays an override text message on the OLED screen."""
+        if self.oled is None:
+            return
+        try:
+            if isinstance(text, (bytes, bytearray)):
+                text = text.decode("utf-8")
+            else:
+                text = str(text)
+
+            self.oled.fill(0)
+            self.oled.text("[Message]", 0, 0)
+            self.oled.hline(0, 10, self.width, 1)
+
+            # Simple line wrapping for 16 chars per line
+            lines = []
+            for raw_line in text.split("\n"):
+                while len(raw_line) > 16:
+                    lines.append(raw_line[:16])
+                    raw_line = raw_line[16:]
+                lines.append(raw_line)
+
+            y = 14
+            for l in lines[:5]:
+                self.oled.text(l, 0, y)
+                y += 10
+            self.oled.show()
+        except Exception as e:
+            print(f"[display] Message render error: {e}")
+
     def update(
         self,
         temp=None,
@@ -77,6 +107,8 @@ class OLEDDisplay:
         wifi_status="connected",
         requests_served=0,
         config_error=None,
+        override_text=None,
+        app_state=None,
     ):
         """Renders sensor data, network status, remote URL, and request count.
 
@@ -90,6 +122,13 @@ class OLEDDisplay:
         - Line 6 (y=54): Reqs: <count>
         """
         if self.oled is None:
+            return
+
+        if app_state is not None and app_state.is_display_overridden():
+            override_text = app_state.display_override_text
+
+        if override_text:
+            self.show_message(override_text)
             return
 
         try:

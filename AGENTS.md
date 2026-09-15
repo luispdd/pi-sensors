@@ -1,0 +1,1 @@
+Do not ever stage or commit files on your own.
