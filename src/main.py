@@ -1,10 +1,12 @@
 """Main entry point for Raspberry Pi Pico W environmental sensor station.
 
 Orchestrates concurrent asyncio tasks for:
-1. Periodic sensor readings (DHT22 & LM393)
-2. SSD1306 OLED display updates with telemetry, URL, and request metrics
+1. Periodic sensor readings (DHT22)
+2. SSD1306 OLED display updates with telemetry, route, and request metrics
 3. WiFi connection management and automatic keepalive reconnects
-4. Asynchronous HTTP web server serving GET /sensors
+4. Asynchronous HTTP web server serving GET /info
+5. Asynchronous IoTMesh CoAP server
+6. Reset button monitoring and alert LED output
 """
 
 import config
@@ -14,6 +16,11 @@ from sensors import SensorReader
 from state import AppState
 from webserver import WebServer
 from coap_server import CoapServer
+
+try:
+    from machine import Pin
+except ImportError:
+    Pin = None
 
 try:
     import uasyncio as asyncio
@@ -39,16 +46,41 @@ async def display_task(app_state: AppState, oled: OLEDDisplay):
             oled.update(
                 temp=app_state.temperature_c,
                 hum=app_state.humidity_pct,
-                light_state=app_state.light,
                 ip=app_state.ip_address,
                 wifi_status=app_state.wifi_status,
                 requests_served=app_state.requests_served,
                 config_error=app_state.config_error,
+                last_caller=app_state.last_caller,
                 app_state=app_state,
             )
         except Exception as e:
             print(f"[main] Error in display task: {e}")
         await asyncio.sleep(config.DISPLAY_REFRESH_INTERVAL_S)
+
+
+async def button_task(app_state: AppState, button_pin, led_pin):
+    """Monitors the reset button and controls the alert LED."""
+    last_pressed = False
+    while True:
+        try:
+            # Sync LED state with alert_active
+            if led_pin is not None:
+                led_pin.value(1 if app_state.alert_active else 0)
+
+            if button_pin is not None:
+                # Active LOW: pressed == 0
+                is_pressed = (button_pin.value() == 0)
+                if is_pressed and not last_pressed:
+                    # Button pressed transition
+                    if app_state.alert_active:
+                        print("[main] Reset button pressed: clearing alert")
+                        app_state.clear_display_override()
+                        if led_pin is not None:
+                            led_pin.value(0)
+                last_pressed = is_pressed
+        except Exception as e:
+            print(f"[main] Error in button task: {e}")
+        await asyncio.sleep(0.05)
 
 
 async def network_task(app_state: AppState, net_mgr: NetworkManager):
@@ -123,6 +155,16 @@ async def main():
     oled = OLEDDisplay()
     oled.show_splash("Pico Station", "Initializing...")
 
+    button_pin = None
+    led_pin = None
+    if Pin is not None:
+        try:
+            button_pin = Pin(config.PIN_BUTTON, Pin.IN, Pin.PULL_UP)
+            led_pin = Pin(config.PIN_LED_ALERT, Pin.OUT)
+            led_pin.value(0)
+        except Exception as e:
+            print(f"[main] Hardware button/LED init error: {e}")
+
     reader = SensorReader()
     # Perform immediate initial sensor reading
     init_data = reader.read_sensors()
@@ -137,9 +179,10 @@ async def main():
     t_network = asyncio.create_task(network_task(app_state, net_mgr))
     t_server = asyncio.create_task(server_task(app_state))
     t_coap = asyncio.create_task(coap_task(app_state))
+    t_button = asyncio.create_task(button_task(app_state, button_pin, led_pin))
 
     # Keep main coroutine alive
-    await asyncio.gather(t_sensors, t_display, t_network, t_server, t_coap)
+    await asyncio.gather(t_sensors, t_display, t_network, t_server, t_coap, t_button)
 
 
 if __name__ == "__main__":

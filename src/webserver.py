@@ -37,8 +37,20 @@ class WebServer:
                 if not header or header == b"\r\n" or header == b"\n":
                     break
 
-            if method == "GET" and path == "/sensors":
+            client_ip = None
+            try:
+                peer = writer.get_extra_info("peername")
+                if peer and len(peer) > 0:
+                    client_ip = peer[0]
+            except Exception:
+                pass
+
+            if method == "GET" and path in ("/info", "/sensors"):
                 self.app_state.requests_served += 1
+                if client_ip:
+                    self.app_state.last_caller = self.app_state.known_nodes.get(
+                        client_ip, client_ip.split(".")[-1]
+                    )
                 payload = json.dumps(self.app_state.to_dict())
                 body_bytes = payload.encode("utf-8")
 

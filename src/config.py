@@ -35,8 +35,8 @@ WIFI_RETRY_INTERVAL_S = 10
 
 # Hardware Pin Mappings (GPIO numbers)
 PIN_DHT22 = 15      # GP15 (Pin 20) - DHT22 Data line
-PIN_LM393 = 14      # GP14 (Pin 19) - LM393 Digital Out (DO)
-LM393_ACTIVE_LOW = True  # Most LM393 photoresistor boards output 0 (LOW) when illuminated
+PIN_BUTTON = 14     # GP14 (Pin 19) - Reset/Acknowledge button (active LOW, internal pull-up)
+PIN_LED_ALERT = 16  # GP16 (Pin 21) - Alert LED (active HIGH, 330 ohm to GND)
 PIN_I2C_SDA = 0     # GP0 (Pin 1) - I2C0 SDA for SSD1306 OLED
 PIN_I2C_SCL = 1     # GP1 (Pin 2) - I2C0 SCL for SSD1306 OLED
 
@@ -57,4 +57,3 @@ HTTP_PORT = 80
 COAP_PORT = 5683
 DEVICE_ID = getattr(secrets, "DEVICE_ID", "pico-1") if (WIFI_CONFIG_ERROR is None and 'secrets' in locals() and hasattr(secrets, "DEVICE_ID")) else "pico-1"
 DEVICE_TYPE = getattr(secrets, "DEVICE_TYPE", "rp2040") if (WIFI_CONFIG_ERROR is None and 'secrets' in locals() and hasattr(secrets, "DEVICE_TYPE")) else "rp2040"
-DISPLAY_OVERRIDE_DURATION_S = 60
