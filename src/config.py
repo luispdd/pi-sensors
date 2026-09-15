@@ -52,3 +52,9 @@ DISPLAY_REFRESH_INTERVAL_S = 1.0   # Refresh OLED display every second
 
 # HTTP Server Configuration
 HTTP_PORT = 80
+
+# CoAP & IoTMesh Configuration
+COAP_PORT = 5683
+DEVICE_ID = getattr(secrets, "DEVICE_ID", "pico-1") if (WIFI_CONFIG_ERROR is None and 'secrets' in locals() and hasattr(secrets, "DEVICE_ID")) else "pico-1"
+DEVICE_TYPE = getattr(secrets, "DEVICE_TYPE", "rp2040") if (WIFI_CONFIG_ERROR is None and 'secrets' in locals() and hasattr(secrets, "DEVICE_TYPE")) else "rp2040"
+DISPLAY_OVERRIDE_DURATION_S = 60

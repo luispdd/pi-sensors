@@ -13,6 +13,7 @@ from network_manager import NetworkManager
 from sensors import SensorReader
 from state import AppState
 from webserver import WebServer
+from coap_server import CoapServer
 
 try:
     import uasyncio as asyncio
@@ -43,6 +44,7 @@ async def display_task(app_state: AppState, oled: OLEDDisplay):
                 wifi_status=app_state.wifi_status,
                 requests_served=app_state.requests_served,
                 config_error=app_state.config_error,
+                app_state=app_state,
             )
         except Exception as e:
             print(f"[main] Error in display task: {e}")
@@ -98,6 +100,21 @@ async def server_task(app_state: AppState):
         await asyncio.sleep(3600)
 
 
+async def coap_task(app_state: AppState):
+    """Starts and runs the asynchronous IoTMesh CoAP server."""
+    try:
+        # Wait until WiFi is connected before binding UDP socket
+        while app_state.wifi_status != "connected":
+            await asyncio.sleep(0.5)
+
+        print(f"[main] WiFi connected, starting CoAP server on port {config.COAP_PORT}...")
+        server = CoapServer(app_state, port=config.COAP_PORT)
+        server.start()
+        await server.run()
+    except Exception as e:
+        print(f"[main] Error in coap_task: {e}")
+
+
 async def main():
     print("=== Raspberry Pi Pico W Sensor Station ===")
     app_state = AppState()
@@ -119,9 +136,10 @@ async def main():
     t_display = asyncio.create_task(display_task(app_state, oled))
     t_network = asyncio.create_task(network_task(app_state, net_mgr))
     t_server = asyncio.create_task(server_task(app_state))
+    t_coap = asyncio.create_task(coap_task(app_state))
 
     # Keep main coroutine alive
-    await asyncio.gather(t_sensors, t_display, t_network, t_server)
+    await asyncio.gather(t_sensors, t_display, t_network, t_server, t_coap)
 
 
 if __name__ == "__main__":

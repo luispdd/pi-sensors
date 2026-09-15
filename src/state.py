@@ -15,7 +15,23 @@ class AppState:
         self.wifi_status = "config_error" if getattr(config, "WIFI_CONFIG_ERROR", None) else "disconnected"
         self.config_error = getattr(config, "WIFI_CONFIG_ERROR", None)
         self.read_errors = 0
+        self.display_override_text = None
+        self.display_override_expires_at = 0
         self._start_time = time.time()
+
+    def set_display_override(self, text, duration_s=60):
+        """Sets a temporary display override message for duration_s seconds."""
+        self.display_override_text = text
+        self.display_override_expires_at = time.time() + duration_s
+
+    def is_display_overridden(self):
+        """Returns True if a display override is currently active."""
+        if self.display_override_text is not None:
+            if time.time() < self.display_override_expires_at:
+                return True
+            self.display_override_text = None
+            self.display_override_expires_at = 0
+        return False
 
     def get_uptime_s(self):
         """Returns elapsed uptime in seconds."""
