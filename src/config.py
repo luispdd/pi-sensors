@@ -1,4 +1,9 @@
-"""Configuration settings for Raspberry Pi Pico W sensor station."""
+import sys
+
+# Ensure local lib directory is in search path across all modules
+for lib_dir in ("lib", "./lib", "/lib", "src/lib"):
+    if lib_dir not in sys.path:
+        sys.path.append(lib_dir)
 
 # Attempt to load credentials from external untracked secrets.py
 WIFI_SSID = None

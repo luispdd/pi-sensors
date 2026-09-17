@@ -10,17 +10,13 @@ Orchestrates concurrent asyncio tasks for:
 """
 
 import config
+from controls import AlertLED, Button
 from display import OLEDDisplay
 from network_manager import NetworkManager
-from sensors import SensorReader
-from state import AppState
+from sensors import SensorReader, get_sensor_reader
+from state import AppState, MODE_SENSOR_DISPLAY, MODE_SEMI_SLEEP, MODE_MESSAGE
 from webserver import WebServer
 from coap_server import CoapServer
-
-try:
-    from machine import Pin
-except ImportError:
-    Pin = None
 
 try:
     import uasyncio as asyncio
@@ -32,52 +28,60 @@ async def sensor_task(app_state: AppState, reader: SensorReader):
     """Periodically reads environmental sensors and updates state."""
     while True:
         try:
-            data = reader.read_sensors()
-            app_state.update_sensors(data)
+            if app_state.mode != MODE_SEMI_SLEEP:
+                data = reader.read_sensors()
+                app_state.update_sensors(data)
+                await asyncio.sleep(config.SENSOR_READ_INTERVAL_S)
+            else:
+                await asyncio.sleep(0.1)
         except Exception as e:
             print(f"[main] Error in sensor task: {e}")
-        await asyncio.sleep(config.SENSOR_READ_INTERVAL_S)
+            await asyncio.sleep(config.SENSOR_READ_INTERVAL_S)
 
 
 async def display_task(app_state: AppState, oled: OLEDDisplay):
     """Periodically refreshes the OLED screen with current metrics."""
     while True:
         try:
-            oled.update(
-                temp=app_state.temperature_c,
-                hum=app_state.humidity_pct,
-                ip=app_state.ip_address,
-                wifi_status=app_state.wifi_status,
-                requests_served=app_state.requests_served,
-                config_error=app_state.config_error,
-                last_caller=app_state.last_caller,
-                app_state=app_state,
-            )
+            if app_state.mode != MODE_SEMI_SLEEP:
+                oled.update_from_state(app_state)
+                await asyncio.sleep(config.DISPLAY_REFRESH_INTERVAL_S)
+            else:
+                await asyncio.sleep(0.1)
         except Exception as e:
             print(f"[main] Error in display task: {e}")
-        await asyncio.sleep(config.DISPLAY_REFRESH_INTERVAL_S)
+            await asyncio.sleep(config.DISPLAY_REFRESH_INTERVAL_S)
 
 
-async def button_task(app_state: AppState, button_pin, led_pin):
+async def button_task(app_state: AppState, button: Button, led: AlertLED, oled: OLEDDisplay = None):
     """Monitors the reset button and controls the alert LED."""
-    last_pressed = False
     while True:
         try:
-            # Sync LED state with alert_active
-            if led_pin is not None:
-                led_pin.value(1 if app_state.alert_active else 0)
+            # Sync LED state with active message mode or pending message
+            led.set(app_state.mode == MODE_MESSAGE or app_state.has_pending_message())
 
-            if button_pin is not None:
-                # Active LOW: pressed == 0
-                is_pressed = (button_pin.value() == 0)
-                if is_pressed and not last_pressed:
-                    # Button pressed transition
-                    if app_state.alert_active:
-                        print("[main] Reset button pressed: clearing alert")
-                        app_state.clear_display_override()
-                        if led_pin is not None:
-                            led_pin.value(0)
-                last_pressed = is_pressed
+            if button.was_pressed():
+                # Button pressed transition edge
+                if app_state.mode == MODE_SENSOR_DISPLAY:
+                    print("[main] Button pressed: entering semi-sleep")
+                    app_state.enter_semi_sleep()
+                    if oled is not None:
+                        oled.power_off()
+                    led.off()
+                elif app_state.mode == MODE_SEMI_SLEEP:
+                    if app_state.has_pending_message():
+                        print("[main] Button pressed: showing pending message")
+                        msg = app_state.pending_message
+                        app_state.enter_message_mode(msg)
+                        led.on()
+                    else:
+                        print("[main] Button pressed: resuming sensor display")
+                        app_state.enter_sensor_mode()
+                        led.off()
+                elif app_state.mode == MODE_MESSAGE:
+                    print("[main] Button pressed: clearing message, resuming sensor display")
+                    app_state.enter_sensor_mode()
+                    led.off()
         except Exception as e:
             print(f"[main] Error in button task: {e}")
         await asyncio.sleep(0.05)
@@ -86,53 +90,48 @@ async def button_task(app_state: AppState, button_pin, led_pin):
 async def network_task(app_state: AppState, net_mgr: NetworkManager):
     """Manages WiFi connection lifecycle and updates network state."""
     if config.WIFI_CONFIG_ERROR:
-        app_state.wifi_status = "config_error"
-        app_state.config_error = config.WIFI_CONFIG_ERROR
+        app_state.update_wifi("config_error", config_error=config.WIFI_CONFIG_ERROR)
         print(f"[main] WiFi disabled due to configuration error: {config.WIFI_CONFIG_ERROR}")
         while True:
             await asyncio.sleep(30.0)
 
     # Initial connection attempt
-    app_state.wifi_status = "connecting"
+    app_state.update_wifi("connecting")
     connected = await net_mgr.connect(timeout_s=15)
     if connected:
-        app_state.wifi_status = "connected"
-        app_state.ip_address = net_mgr.get_ip()
+        app_state.update_wifi("connected", ip=net_mgr.get_ip())
     else:
-        app_state.wifi_status = "disconnected"
+        app_state.update_wifi("disconnected")
 
     # Keepalive loop
     while True:
         try:
             if not net_mgr.is_connected():
-                app_state.wifi_status = "connecting"
-                app_state.ip_address = None
+                app_state.update_wifi("connecting")
                 print("[main] WiFi disconnected, attempting reconnection...")
                 connected = await net_mgr.connect(timeout_s=12)
                 if connected:
-                    app_state.wifi_status = "connected"
-                    app_state.ip_address = net_mgr.get_ip()
+                    app_state.update_wifi("connected", ip=net_mgr.get_ip())
                 else:
-                    app_state.wifi_status = "disconnected"
+                    app_state.update_wifi("disconnected")
                     await asyncio.sleep(config.WIFI_RETRY_INTERVAL_S)
             else:
-                app_state.wifi_status = "connected"
-                app_state.ip_address = net_mgr.get_ip()
+                app_state.update_wifi("connected", ip=net_mgr.get_ip())
                 await asyncio.sleep(5.0)
         except Exception as e:
             print(f"[main] Error in network task: {e}")
             await asyncio.sleep(5.0)
 
 
-async def server_task(app_state: AppState):
+async def server_task(app_state: AppState, reader: SensorReader = None):
     """Starts and runs the asynchronous HTTP server."""
-    server = WebServer(app_state, host="0.0.0.0", port=config.HTTP_PORT)
+    server = WebServer(app_state, reader=reader, host="0.0.0.0", port=config.HTTP_PORT)
     await server.start()
     while True:
         await asyncio.sleep(3600)
 
 
-async def coap_task(app_state: AppState):
+async def coap_task(app_state: AppState, reader: SensorReader = None):
     """Starts and runs the asynchronous IoTMesh CoAP server."""
     try:
         # Wait until WiFi is connected before binding UDP socket
@@ -140,7 +139,7 @@ async def coap_task(app_state: AppState):
             await asyncio.sleep(0.5)
 
         print(f"[main] WiFi connected, starting CoAP server on port {config.COAP_PORT}...")
-        server = CoapServer(app_state, port=config.COAP_PORT)
+        server = CoapServer(app_state, reader=reader, port=config.COAP_PORT)
         server.start()
         await server.run()
     except Exception as e:
@@ -155,17 +154,10 @@ async def main():
     oled = OLEDDisplay()
     oled.show_splash("Pico Station", "Initializing...")
 
-    button_pin = None
-    led_pin = None
-    if Pin is not None:
-        try:
-            button_pin = Pin(config.PIN_BUTTON, Pin.IN, Pin.PULL_UP)
-            led_pin = Pin(config.PIN_LED_ALERT, Pin.OUT)
-            led_pin.value(0)
-        except Exception as e:
-            print(f"[main] Hardware button/LED init error: {e}")
+    button = Button(config.PIN_BUTTON)
+    led = AlertLED(config.PIN_LED_ALERT)
 
-    reader = SensorReader()
+    reader = get_sensor_reader()
     # Perform immediate initial sensor reading
     init_data = reader.read_sensors()
     app_state.update_sensors(init_data)
@@ -177,9 +169,9 @@ async def main():
     t_sensors = asyncio.create_task(sensor_task(app_state, reader))
     t_display = asyncio.create_task(display_task(app_state, oled))
     t_network = asyncio.create_task(network_task(app_state, net_mgr))
-    t_server = asyncio.create_task(server_task(app_state))
-    t_coap = asyncio.create_task(coap_task(app_state))
-    t_button = asyncio.create_task(button_task(app_state, button_pin, led_pin))
+    t_server = asyncio.create_task(server_task(app_state, reader))
+    t_coap = asyncio.create_task(coap_task(app_state, reader))
+    t_button = asyncio.create_task(button_task(app_state, button, led, oled))
 
     # Keep main coroutine alive
     await asyncio.gather(t_sensors, t_display, t_network, t_server, t_coap, t_button)

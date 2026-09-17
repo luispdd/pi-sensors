@@ -3,10 +3,7 @@
 import json
 import sys
 import config
-
-for lib_dir in ("lib", "./lib", "/lib", "src/lib"):
-    if lib_dir not in sys.path:
-        sys.path.append(lib_dir)
+from state import MODE_SEMI_SLEEP
 
 try:
     import socket
@@ -45,8 +42,9 @@ def extract_device_id_from_json(json_text):
 
 
 class CoapServer:
-    def __init__(self, app_state, port=getattr(config, "COAP_PORT", 5683)):
+    def __init__(self, app_state, reader=None, port=getattr(config, "COAP_PORT", 5683)):
         self.app_state = app_state
+        self.reader = reader
         self.port = port
         self.coap = microcoapy.Coap()
         self.coap.debug = False
@@ -67,11 +65,7 @@ class CoapServer:
 
     def _record_caller(self, sender_ip):
         """Increments request counter and updates last_caller."""
-        self.app_state.requests_served += 1
-        if sender_ip in self.app_state.known_nodes:
-            self.app_state.last_caller = self.app_state.known_nodes[sender_ip]
-        else:
-            self.app_state.last_caller = sender_ip.split(".")[-1]
+        self.app_state.record_request(sender_ip)
 
     def _handle_response(self, packet, remote_address):
         """Processes incoming CoAP responses to learn node IDs for known_nodes cache."""
@@ -92,10 +86,7 @@ class CoapServer:
             device_id = extract_device_id_from_link_format(payload_str)
 
         if device_id:
-            self.app_state.known_nodes[sender_ip] = device_id
-            fallback_octet = sender_ip.split(".")[-1]
-            if self.app_state.last_caller == fallback_octet:
-                self.app_state.last_caller = device_id
+            self.app_state.register_node(sender_ip, device_id)
 
     async def _probe_caller(self, sender_ip, sender_port=5683):
         """Asynchronously probes an unknown sender for its node identification."""
@@ -163,6 +154,10 @@ class CoapServer:
 
         self._record_caller(sender_ip)
 
+        if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
+            data = self.reader.read_sensors()
+            self.app_state.update_sensors(data)
+
         senml = {
             "n": "temperature",
             "u": "Cel",
@@ -184,6 +179,10 @@ class CoapServer:
             return
 
         self._record_caller(sender_ip)
+
+        if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
+            data = self.reader.read_sensors()
+            self.app_state.update_sensors(data)
 
         senml = {
             "n": "humidity",
@@ -207,6 +206,10 @@ class CoapServer:
 
         self._record_caller(sender_ip)
 
+        if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
+            data = self.reader.read_sensors()
+            self.app_state.update_sensors(data)
+
         # SenML Pack (JSON array) without light
         pack = [
             {"n": "temperature", "u": "Cel", "v": self.app_state.temperature_c},
@@ -227,7 +230,7 @@ class CoapServer:
             self._send_method_not_allowed(packet, sender_ip, sender_port)
             return
 
-        self.app_state.requests_served += 1
+        self._record_caller(sender_ip)
 
         text = ""
         if packet.payload:
@@ -242,17 +245,17 @@ class CoapServer:
         if len(text) > 256:
             text = text[:256]
 
-        caller = None
-        if sender_ip in self.app_state.known_nodes:
-            caller = self.app_state.known_nodes[sender_ip]
-        else:
-            caller = sender_ip.split(".")[-1]
+        caller = self.app_state.resolve_caller(sender_ip)
+        if sender_ip not in self.app_state.known_nodes:
             try:
                 asyncio.create_task(self._probe_caller(sender_ip, sender_port))
             except Exception as e:
                 print(f"[coap] Caller probe trigger error: {e}")
 
-        self.app_state.set_display_override(text, caller=caller)
+        if self.app_state.mode == MODE_SEMI_SLEEP:
+            self.app_state.set_pending_message(text, caller=caller)
+        else:
+            self.app_state.enter_message_mode(text, caller=caller)
 
         self.coap.sendResponse(
             sender_ip,

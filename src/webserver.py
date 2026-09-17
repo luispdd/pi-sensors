@@ -3,6 +3,7 @@
 import gc
 import json
 import config
+from state import MODE_SEMI_SLEEP
 
 try:
     import uasyncio as asyncio
@@ -11,8 +12,9 @@ except ImportError:
 
 
 class WebServer:
-    def __init__(self, app_state, host="0.0.0.0", port=getattr(config, "HTTP_PORT", 80)):
+    def __init__(self, app_state, reader=None, host="0.0.0.0", port=getattr(config, "HTTP_PORT", 80)):
         self.app_state = app_state
+        self.reader = reader
         self.host = host
         self.port = port
         self.server = None
@@ -46,11 +48,10 @@ class WebServer:
                 pass
 
             if method == "GET" and path in ("/info", "/sensors"):
-                self.app_state.requests_served += 1
-                if client_ip:
-                    self.app_state.last_caller = self.app_state.known_nodes.get(
-                        client_ip, client_ip.split(".")[-1]
-                    )
+                self.app_state.record_request(client_ip)
+                if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
+                    data = self.reader.read_sensors()
+                    self.app_state.update_sensors(data)
                 payload = json.dumps(self.app_state.to_dict())
                 body_bytes = payload.encode("utf-8")
 

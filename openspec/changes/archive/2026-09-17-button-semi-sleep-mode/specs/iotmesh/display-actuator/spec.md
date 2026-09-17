@@ -1,10 +1,4 @@
-# Display Actuator Specification
-
-## Purpose
-
-Allows remote CoAP clients to temporarily display a custom message on the device's OLED screen by sending a plain text payload.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Display Actuation
 The system SHALL expose a CoAP `POST /display` endpoint that accepts plain text (UTF-8, max 256 bytes).
@@ -53,3 +47,13 @@ The physical button on GP14 (active-LOW with internal pull-up) SHALL cycle the d
 #### Scenario: Button pressed in MESSAGE mode
 - **WHEN** the button is pressed while the mode is `MODE_MESSAGE`
 - **THEN** the system SHALL clear the message and pending message, turn the LED off, and transition to `MODE_SENSOR_DISPLAY`
+
+## REMOVED Requirements
+
+### Requirement: Temporary Override Timer
+**Reason**: Replaced by the button-driven mode cycle. Messages now persist until the user acknowledges them with a button press; time-based auto-dismissal is removed.
+**Migration**: No external API change. The `POST /display` endpoint and response code are unchanged.
+
+### Requirement: Timer Reset
+**Reason**: The 60-second timer mechanism is removed alongside the Temporary Override Timer requirement.
+**Migration**: Sending a new `POST /display` while in `MODE_MESSAGE` still replaces the displayed text; the button is now the only dismissal mechanism.

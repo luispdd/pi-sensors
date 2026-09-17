@@ -1,10 +1,4 @@
-# Display Service Specification
-
-## Purpose
-
-Renders real-time environmental metrics, system status, WiFi network connection parameters, remote access endpoint URL, and API request count onto a connected SSD1306 OLED display.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Display Operation Modes
 The system SHALL support three mutually exclusive display modes, identified by named constants:

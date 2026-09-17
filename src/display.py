@@ -3,11 +3,6 @@
 import sys
 import config
 
-# Ensure local lib directory is in search path
-for lib_dir in ("lib", "./lib", "/lib", "src/lib"):
-    if lib_dir not in sys.path:
-        sys.path.append(lib_dir)
-
 try:
     from machine import I2C, Pin
 except ImportError:
@@ -55,6 +50,15 @@ class OLEDDisplay:
             except Exception as e:
                 print(f"[display] Clear error: {e}")
 
+    def power_off(self):
+        """Blanks and powers off the display for semi-sleep mode."""
+        if self.oled is not None:
+            try:
+                self.oled.fill(0)
+                self.oled.show()
+            except Exception as e:
+                print(f"[display] Power off error: {e}")
+
     def show_splash(self, title="Pico Station", subtitle="Starting..."):
         """Displays a startup splash screen."""
         if self.oled is None:
@@ -98,7 +102,7 @@ class OLEDDisplay:
         except Exception as e:
             print(f"[display] Message render error: {e}")
 
-    def update(
+    def render_status(
         self,
         temp=None,
         hum=None,
@@ -108,8 +112,6 @@ class OLEDDisplay:
         config_error=None,
         last_caller=None,
         override_text=None,
-        app_state=None,
-        **kwargs,
     ):
         """Renders sensor data, network status, remote route, request count, and last caller.
 
@@ -122,24 +124,6 @@ class OLEDDisplay:
         """
         if self.oled is None:
             return
-
-        if app_state is not None:
-            if app_state.is_display_overridden():
-                override_text = app_state.display_override_text
-            if temp is None:
-                temp = app_state.temperature_c
-            if hum is None:
-                hum = app_state.humidity_pct
-            if ip is None:
-                ip = app_state.ip_address
-            if wifi_status == "connected" and app_state.wifi_status != "connected":
-                wifi_status = app_state.wifi_status
-            if requests_served == 0:
-                requests_served = app_state.requests_served
-            if config_error is None:
-                config_error = app_state.config_error
-            if last_caller is None:
-                last_caller = getattr(app_state, "last_caller", None)
 
         if override_text:
             self.show_message(override_text)
@@ -180,4 +164,47 @@ class OLEDDisplay:
             self.oled.show()
         except Exception as e:
             print(f"[display] Render error: {e}")
+
+    def update_from_state(self, app_state):
+        """Extracts display parameters from AppState and renders them."""
+        override_text = app_state.display_override_text if app_state.is_display_overridden() else None
+        self.render_status(
+            temp=app_state.temperature_c,
+            hum=app_state.humidity_pct,
+            ip=app_state.ip_address,
+            wifi_status=app_state.wifi_status,
+            requests_served=app_state.requests_served,
+            config_error=app_state.config_error,
+            last_caller=app_state.last_caller,
+            override_text=override_text,
+        )
+
+    def update(
+        self,
+        temp=None,
+        hum=None,
+        ip=None,
+        wifi_status="connected",
+        requests_served=0,
+        config_error=None,
+        last_caller=None,
+        override_text=None,
+        app_state=None,
+        **kwargs,
+    ):
+        """Backwards-compatible update method accepting either app_state or discrete values."""
+        if app_state is not None:
+            self.update_from_state(app_state)
+        else:
+            self.render_status(
+                temp=temp,
+                hum=hum,
+                ip=ip,
+                wifi_status=wifi_status,
+                requests_served=requests_served,
+                config_error=config_error,
+                last_caller=last_caller,
+                override_text=override_text,
+            )
+
 
