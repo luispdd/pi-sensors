@@ -44,7 +44,7 @@ The environmental station currently tracks light via an LM393 sensor on GP14, re
 ### 5. Directory Structure
 - The project code for each board SHALL be organized functionally within `boards/<board-name>/`.
 - Files should be grouped into directories according to their function to maintain a clean structure.
-- **Example (`boards/pico-dh22-screen/`)**:
+- **Example (`boards/pico-1w/`)**:
   - `settings/`: Configuration and secrets (e.g., `config.py`, `secrets.py`).
   - `services/`: Network servers and services (e.g., `webserver.py`, `coap_server.py`).
   - `hardware/`: Physical device interfaces (e.g., `sensors.py`, `display.py`, `controls.py`).
