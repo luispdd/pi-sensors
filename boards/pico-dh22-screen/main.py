@@ -9,14 +9,14 @@ Orchestrates concurrent asyncio tasks for:
 6. Reset button monitoring and alert LED output
 """
 
-import config
-from controls import AlertLED, Button
-from display import OLEDDisplay
-from network_manager import NetworkManager
-from sensors import SensorReader, get_sensor_reader
-from state import AppState, MODE_SENSOR_DISPLAY, MODE_SEMI_SLEEP, MODE_MESSAGE
-from webserver import WebServer
-from coap_server import CoapServer
+from settings import config
+from hardware.controls import AlertLED, Button
+from hardware.display import OLEDDisplay
+from services.network_manager import NetworkManager
+from hardware.sensors import SensorReader, get_sensor_reader
+from core.state import AppState, MODE_SENSOR_DISPLAY, MODE_SEMI_SLEEP, MODE_MESSAGE
+from services.webserver import WebServer
+from services.coap_server import CoapServer
 
 try:
     import uasyncio as asyncio

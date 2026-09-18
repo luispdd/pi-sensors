@@ -41,6 +41,16 @@ The environmental station currently tracks light via an LM393 sensor on GP14, re
   3. If still unknown, use `sender_ip.split(".")[-1]` (last octet).
   4. Record on `app_state.last_caller` to render on OLED Line 4.
 
+### 5. Directory Structure
+- The project code for each board SHALL be organized functionally within `boards/<board-name>/`.
+- Files should be grouped into directories according to their function to maintain a clean structure.
+- **Example (`boards/pico-dh22-screen/`)**:
+  - `settings/`: Configuration and secrets (e.g., `config.py`, `secrets.py`).
+  - `services/`: Network servers and services (e.g., `webserver.py`, `coap_server.py`).
+  - `hardware/`: Physical device interfaces (e.g., `sensors.py`, `display.py`, `controls.py`).
+  - `core/`: Application logic and state management (e.g., `state.py`).
+  - `lib/`: Shared libraries and external dependencies.
+
 ## Risks / Trade-offs
 
 - **[Risk] Discovery probe latency on POST /display** → *Mitigation*: Run discovery asynchronously without blocking the CoAP `2.04 Changed` response back to the client.

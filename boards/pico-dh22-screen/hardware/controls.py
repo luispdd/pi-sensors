@@ -1,6 +1,6 @@
 """Hardware abstractions for physical input button and alert LED."""
 
-import config
+from settings import config
 
 try:
     from machine import Pin
