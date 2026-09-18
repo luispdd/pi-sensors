@@ -1,6 +1,6 @@
 # Pico DHT22 Screen Node
 
-This folder contains the complete firmware for the `pico-dh22-screen` board.
+This folder contains the complete firmware for the `pico-1w` board.
 This device integrates a DHT22 sensor and an SSD1306 OLED screen, communicating via the `iotmesh` protocol over CoAP.
 
 ## Deployment

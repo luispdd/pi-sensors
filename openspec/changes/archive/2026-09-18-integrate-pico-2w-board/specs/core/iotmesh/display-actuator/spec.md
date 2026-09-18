@@ -1,10 +1,4 @@
-# Display Actuator Specification
-
-## Purpose
-
-Allows remote CoAP clients to temporarily display a custom message on the device's display screen by sending a plain text payload.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Display Actuation
 The system SHALL expose a CoAP `POST /display` endpoint that accepts plain text (UTF-8, max 256 bytes).

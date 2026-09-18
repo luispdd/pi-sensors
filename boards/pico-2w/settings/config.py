@@ -1,9 +1,9 @@
 import sys
 
-# Ensure local lib directory is in search path across all modules
-for lib_dir in ("lib", "./lib", "/lib", "src/lib"):
-    if lib_dir not in sys.path:
-        sys.path.append(lib_dir)
+# Ensure local lib and settings directories are in search path across all modules
+for search_dir in ("lib", "./lib", "/lib", "src/lib", "settings", "./settings", "/settings"):
+    if search_dir not in sys.path:
+        sys.path.append(search_dir)
 
 # Attempt to load credentials from external untracked secrets.py
 WIFI_SSID = None
@@ -38,29 +38,45 @@ def has_valid_credentials():
 # WiFi Retry Interval
 WIFI_RETRY_INTERVAL_S = 10
 
-# Hardware Pin Mappings (GPIO numbers)
-PIN_DHT22 = 15      # GP15 (Pin 20) - DHT22 Data line
+# Hardware Pin Mappings (GPIO numbers for Pico 2 W / RP2350)
 PIN_BUTTON = 14     # GP14 (Pin 19) - Reset/Acknowledge button (active LOW, internal pull-up)
-PIN_LED_ALERT = 16  # GP16 (Pin 21) - Alert LED (active HIGH, 330 ohm to GND)
-PIN_I2C_SDA = 0     # GP0 (Pin 1) - I2C0 SDA for SSD1306 OLED
-PIN_I2C_SCL = 1     # GP1 (Pin 2) - I2C0 SCL for SSD1306 OLED
+PIN_LED_ALERT = "LED" 
 
-# I2C & OLED Display Settings
-I2C_ID = 0
-I2C_FREQ = 400_000  # 400kHz
-OLED_WIDTH = 128
-OLED_HEIGHT = 64
+SPI_BUS = 0
+SPI_SCK = 18    # GP18 - Pin 24 - shared SCK
+SPI_MOSI = 19   # GP19 - Pin 25 - shared MOSI (TFT SDA, SD MOSI)
+SPI_MISO = 16   # GP16 - Pin 21 - SD MISO only (TFT has no MISO)
+
+TFT_CS = 17     # GP17 - Pin 22 - TFT chip select (active LOW)
+TFT_DC = 20     # GP20 - Pin 26 - data/command (LOW=cmd, HIGH=data)
+TFT_RESET = 21  # GP21 - Pin 27 - reset (active LOW)
+
+SD_CS = 22      # GP22 - Pin 29 - SD chip select (active LOW)
+
+# SPI Clock Speeds
+SPI_SPEED_SD_INIT = 400_000     # <=400 kHz required for SD identification phase
+SPI_SPEED_SD_DATA = 10_000_000  # 10 MHz for SD data transfers after init
+SPI_SPEED_TFT = 20_000_000      # 20 MHz for TFT pixel writes
+
+# TFT Display Geometry
+TFT_WIDTH = 128
+TFT_HEIGHT = 160
+TFT_MADCTL = 0x00
+
+# Display geometry alias
+DISPLAY_WIDTH = TFT_WIDTH
+DISPLAY_HEIGHT = TFT_HEIGHT
 
 # Timing & Intervals (in seconds)
-SENSOR_READ_INTERVAL_S = 2.0       # DHT22 requires >= 1-2s between readings
-DISPLAY_REFRESH_INTERVAL_S = 1.0   # Refresh OLED display every second
+SENSOR_READ_INTERVAL_S = 2.0
+DISPLAY_REFRESH_INTERVAL_S = 1.0
 
 # HTTP Server Configuration
 HTTP_PORT = 80
 
 # CoAP & IoTMesh Configuration
 COAP_PORT = 5683
-DEFAULT_DEVICE_ID = "pico-1w"
-DEFAULT_DEVICE_TYPE = "rp2040"
+DEFAULT_DEVICE_ID = "pico-2w"
+DEFAULT_DEVICE_TYPE = "rp2350"
 DEVICE_ID = getattr(secrets, "DEVICE_ID", DEFAULT_DEVICE_ID) if (WIFI_CONFIG_ERROR is None and 'secrets' in locals() and hasattr(secrets, "DEVICE_ID")) else DEFAULT_DEVICE_ID
 DEVICE_TYPE = getattr(secrets, "DEVICE_TYPE", DEFAULT_DEVICE_TYPE) if (WIFI_CONFIG_ERROR is None and 'secrets' in locals() and hasattr(secrets, "DEVICE_TYPE")) else DEFAULT_DEVICE_TYPE
