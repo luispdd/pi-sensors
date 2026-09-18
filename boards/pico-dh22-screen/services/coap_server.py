@@ -104,8 +104,8 @@ class CoapServer:
 
         self._record_caller(sender_ip)
 
-        device_id = getattr(config, "DEVICE_ID", "pico-1")
-        device_type = getattr(config, "DEVICE_TYPE", "rp2040")
+        device_id = getattr(config, "DEVICE_ID", config.DEFAULT_DEVICE_ID)
+        device_type = getattr(config, "DEVICE_TYPE", config.DEFAULT_DEVICE_TYPE)
 
         # CoRE Link Format string per IoTMesh spec v0.1 (excluding light)
         link_format = (
@@ -134,8 +134,8 @@ class CoapServer:
         self._record_caller(sender_ip)
 
         payload = {
-            "id": getattr(config, "DEVICE_ID", "pico-1"),
-            "type": getattr(config, "DEVICE_TYPE", "rp2040"),
+            "id": getattr(config, "DEVICE_ID", config.DEFAULT_DEVICE_ID),
+            "type": getattr(config, "DEVICE_TYPE", config.DEFAULT_DEVICE_TYPE),
         }
         self.coap.sendResponse(
             sender_ip,

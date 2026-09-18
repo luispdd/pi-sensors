@@ -60,5 +60,7 @@ HTTP_PORT = 80
 
 # CoAP & IoTMesh Configuration
 COAP_PORT = 5683
-DEVICE_ID = getattr(secrets, "DEVICE_ID", "pico-1") if (WIFI_CONFIG_ERROR is None and 'secrets' in locals() and hasattr(secrets, "DEVICE_ID")) else "pico-1"
-DEVICE_TYPE = getattr(secrets, "DEVICE_TYPE", "rp2040") if (WIFI_CONFIG_ERROR is None and 'secrets' in locals() and hasattr(secrets, "DEVICE_TYPE")) else "rp2040"
+DEFAULT_DEVICE_ID = "pico-1w"
+DEFAULT_DEVICE_TYPE = "rp2040"
+DEVICE_ID = getattr(secrets, "DEVICE_ID", DEFAULT_DEVICE_ID) if (WIFI_CONFIG_ERROR is None and 'secrets' in locals() and hasattr(secrets, "DEVICE_ID")) else DEFAULT_DEVICE_ID
+DEVICE_TYPE = getattr(secrets, "DEVICE_TYPE", DEFAULT_DEVICE_TYPE) if (WIFI_CONFIG_ERROR is None and 'secrets' in locals() and hasattr(secrets, "DEVICE_TYPE")) else DEFAULT_DEVICE_TYPE
