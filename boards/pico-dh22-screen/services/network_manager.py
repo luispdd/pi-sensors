@@ -1,6 +1,6 @@
 """WiFi network management for Raspberry Pi Pico W."""
 
-import config
+from settings import config
 
 try:
     import uasyncio as asyncio

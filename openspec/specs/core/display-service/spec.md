@@ -57,8 +57,8 @@ The system SHALL present the device's assigned local IP address, the remote HTTP
 - **THEN** the OLED screen SHALL display an error message reporting the missing or invalid WiFi configuration
 
 ### Requirement: OLED display hardware driver dependency
-The system SHALL use the `stlehmann/micropython-ssd1306` driver located at `src/lib/ssd1306.py` (accessible in the `lib/` directory) for I2C communication with the SSD1306 OLED controller.
+The system SHALL use the `stlehmann/micropython-ssd1306` driver located at `boards/<board-name>/lib/ssd1306.py` (accessible in the `lib/` directory) for I2C communication with the SSD1306 OLED controller.
 
 #### Scenario: Driver loading from lib directory
 - **WHEN** the display service initializes
-- **THEN** it SHALL import the `SSD1306_I2C` class from the `ssd1306` module located in `lib/` (within `src/`) and instantiate the display driver with the configured I2C interface
+- **THEN** it SHALL import the `SSD1306_I2C` class from the `ssd1306` module located in `lib/` (within `boards/<board-name>/`) and instantiate the display driver with the configured I2C interface

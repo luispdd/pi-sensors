@@ -1,7 +1,7 @@
 """SSD1306 OLED Display service for Raspberry Pi Pico W."""
 
 import sys
-import config
+from settings import config
 
 try:
     from machine import I2C, Pin

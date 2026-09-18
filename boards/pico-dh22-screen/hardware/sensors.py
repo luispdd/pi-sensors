@@ -1,6 +1,6 @@
 """Sensor management for DHT22 (temperature/humidity)."""
 
-import config
+from settings import config
 
 try:
     import dht

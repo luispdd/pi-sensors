@@ -1,7 +1,7 @@
 """Application state shared between sensors, display, network, and web server."""
 
 import time
-import config
+from settings import config
 
 
 MODE_SENSOR_DISPLAY = 0

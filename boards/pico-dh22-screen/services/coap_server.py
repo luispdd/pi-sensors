@@ -2,8 +2,8 @@
 
 import json
 import sys
-import config
-from state import MODE_SEMI_SLEEP
+from settings import config
+from core.state import MODE_SEMI_SLEEP
 
 try:
     import socket
