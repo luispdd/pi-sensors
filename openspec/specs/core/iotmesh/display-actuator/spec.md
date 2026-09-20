@@ -57,3 +57,14 @@ When a physical button is wired, pressing it SHALL cycle the display mode. On bo
 #### Scenario: No button wired
 - **WHEN** the board has no physical button connected
 - **THEN** mode transitions SHALL only occur via CoAP `POST /display` commands and the system SHALL remain in the current mode until a CoAP command changes it
+
+### Requirement: Alert LED Indication
+The system SHALL illuminate a dedicated alert LED on GP16 whenever an active message alert is displayed, and extinguish the LED when dismissed.
+
+#### Scenario: LED illuminates on message receipt
+- **WHEN** a `POST /display` command is received
+- **THEN** the alert LED turns ON
+
+#### Scenario: LED turns off on button acknowledgement
+- **WHEN** the user presses the reset button to dismiss the message
+- **THEN** the alert LED turns OFF

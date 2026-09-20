@@ -29,5 +29,12 @@ The system SHALL serve an HTTP GET endpoint at `/sensors` responding with valid 
 - **THEN** the system increments the request counter by 1, and returns HTTP 200 with header `Content-Type: application/json` and a JSON body containing temperature, humidity, light status, request count, uptime, and status
 
 #### Scenario: Unrecognized route request
-- **WHEN** a client requests a path other than `/sensors`
-- **THEN** the system returns HTTP 404 Not Found without incrementing the `/sensors` request counter
+- **WHEN** a client requests a path other than `/sensors` or `/info`
+- **THEN** the system returns HTTP 404 Not Found without incrementing the request counter
+
+### Requirement: JSON HTTP endpoint /info
+The system SHALL serve an HTTP GET endpoint at `/info` responding with valid JSON containing environmental measurements and system telemetry.
+
+#### Scenario: Successful GET /info request
+- **WHEN** a client performs an HTTP `GET /info` request
+- **THEN** the system increments the request counter and returns HTTP 200 with JSON telemetry

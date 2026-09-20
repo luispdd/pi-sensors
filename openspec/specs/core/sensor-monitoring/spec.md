@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provides periodic environmental telemetry by acquiring ambient temperature, relative humidity, and digital light presence measurements from connected sensors.
+Provides periodic environmental telemetry by acquiring ambient temperature and relative humidity measurements from connected sensors.
 
 ## Requirements
 
@@ -35,14 +35,3 @@ When the mode is `MODE_SEMI_SLEEP`, the system SHALL perform a single synchronou
 #### Scenario: No on-demand read in active modes
 - **WHEN** a sensor request arrives and the mode is `MODE_SENSOR_DISPLAY` or `MODE_MESSAGE`
 - **THEN** the system SHALL respond with the most recently cached values without triggering an additional DHT22 read
-
-### Requirement: Ambient light detection
-The system SHALL monitor digital output state from the LM393 photoresistor light sensor module on GP14 to determine whether the environment is currently illuminated or dark.
-
-#### Scenario: Light detected
-- **WHEN** the light level exceeds the LM393 potentiometer threshold (digital signal active)
-- **THEN** the system SHALL record the light status as "light" (or boolean true)
-
-#### Scenario: Darkness detected
-- **WHEN** the light level falls below the LM393 threshold
-- **THEN** the system SHALL record the light status as "dark" (or boolean false)

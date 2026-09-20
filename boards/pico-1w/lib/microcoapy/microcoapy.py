@@ -140,14 +140,25 @@ class Coap:
         return self.sendPacket(ip, port, packet)
 
     # to be tested
-    def sendResponse(self, ip, port, messageid, payload, method, content_format, token):
+    def sendResponse(self, ip, port, messageid, payload, method, content_format, token, request_packet=None):
         packet = CoapPacket()
 
-        packet.type = macros.COAP_TYPE.COAP_ACK
+        if request_packet is not None and request_packet.type == macros.COAP_TYPE.COAP_NONCON:
+            packet.type = macros.COAP_TYPE.COAP_NONCON
+            # Generate new message ID for NON responses
+            try:
+                import urandom
+                packet.messageid = urandom.getrandbits(16)
+            except Exception:
+                import time
+                packet.messageid = int(time.time() * 1000) & 0xFFFF
+        else:
+            packet.type = macros.COAP_TYPE.COAP_ACK
+            packet.messageid = messageid
+            
         packet.method = method
         packet.token = token
         packet.payload = payload
-        packet.messageid = messageid
         packet.content_format = content_format
 
         return self.sendPacket(ip, port, packet)

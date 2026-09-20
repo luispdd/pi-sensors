@@ -1,6 +1,7 @@
 """CoAP server implementing IoTMesh Service Spec v0.1 for Raspberry Pi Pico 2 W."""
 
 import json
+import struct
 import sys
 from settings import config
 from core.state import MODE_SEMI_SLEEP
@@ -123,7 +124,7 @@ class CoapServer:
             link_format,
             COAP_RESPONSE_CODE.COAP_CONTENT,
             COAP_CONTENT_FORMAT.COAP_APPLICATION_LINK_FORMAT,
-            packet.token,
+            packet.token, request_packet=packet,
         )
 
     def _handle_id(self, packet, sender_ip, sender_port):
@@ -144,7 +145,7 @@ class CoapServer:
             json.dumps(payload),
             COAP_RESPONSE_CODE.COAP_CONTENT,
             COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
-            packet.token,
+            packet.token, request_packet=packet,
         )
 
     def _handle_sensor_temperature(self, packet, sender_ip, sender_port):
@@ -170,7 +171,7 @@ class CoapServer:
             json.dumps(senml),
             COAP_RESPONSE_CODE.COAP_CONTENT,
             COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
-            packet.token,
+            packet.token, request_packet=packet,
         )
 
     def _handle_sensor_humidity(self, packet, sender_ip, sender_port):
@@ -196,7 +197,7 @@ class CoapServer:
             json.dumps(senml),
             COAP_RESPONSE_CODE.COAP_CONTENT,
             COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
-            packet.token,
+            packet.token, request_packet=packet,
         )
 
     def _handle_sensors_collection(self, packet, sender_ip, sender_port):
@@ -221,7 +222,7 @@ class CoapServer:
             json.dumps(pack),
             COAP_RESPONSE_CODE.COAP_CONTENT,
             COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
-            packet.token,
+            packet.token, request_packet=packet,
         )
 
     def _handle_display(self, packet, sender_ip, sender_port):
@@ -263,7 +264,7 @@ class CoapServer:
             None,
             COAP_RESPONSE_CODE.COAP_CHANGED,
             COAP_CONTENT_FORMAT.COAP_NONE,
-            packet.token,
+            packet.token, request_packet=packet,
         )
 
     def _send_method_not_allowed(self, packet, sender_ip, sender_port):
@@ -274,11 +275,11 @@ class CoapServer:
             "Method Not Allowed",
             COAP_RESPONSE_CODE.COAP_METHOD_NOT_ALLOWD,
             COAP_CONTENT_FORMAT.COAP_TEXT_PLAIN,
-            packet.token,
+            packet.token, request_packet=packet,
         )
 
     def start(self):
-        """Initializes and binds the UDP socket for unicast and broadcast."""
+        """Initializes and binds the UDP socket for unicast, broadcast, and CoAP multicast."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -289,6 +290,17 @@ class CoapServer:
         except Exception:
             pass
         sock.bind(("0.0.0.0", self.port))
+        # Join CoAP IPv4 multicast group (RFC 7252 §12.8) so the board receives
+        # discovery requests sent to 224.0.1.187 in addition to broadcast.
+        try:
+            COAP_MULTICAST_GROUP = "224.0.1.187"
+            # usocket on MicroPython lacks inet_aton; pack each octet manually.
+            ip_bytes = bytes(int(x) for x in COAP_MULTICAST_GROUP.split("."))
+            mreq = struct.pack("4sL", ip_bytes, 0)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            print(f"[coap] Joined multicast group {COAP_MULTICAST_GROUP}")
+        except Exception as e:
+            print(f"[coap] Multicast join skipped (not supported): {e}")
         sock.setblocking(False)
         self.coap.setCustomSocket(sock)
         print(f"[coap] Server listening on UDP port {self.port}")

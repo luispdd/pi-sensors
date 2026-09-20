@@ -42,15 +42,15 @@ The system SHALL update the connected display with the latest temperature, humid
 - **THEN** the display SHALL render `--.-C` for temperature and `--%` for humidity
 
 ### Requirement: Network connectivity, remote URL, and request count display
-The system SHALL present the device's assigned local IP address, the remote HTTP route `/info`, and the cumulative count of requests served over WiFi on the display when in `MODE_SENSOR_DISPLAY`.
+The system SHALL present the device's assigned local IP address (without `http://` prefix), the remote HTTP route `/info`, the cumulative count of requests served over WiFi, and the last request caller on the display when in `MODE_SENSOR_DISPLAY`.
 
 #### Scenario: WiFi connected with remote route and hit count
-- **WHEN** the node connects to WiFi, starts the HTTP server, and the mode is `MODE_SENSOR_DISPLAY`
-- **THEN** the display SHALL show the assigned IPv4 address, the route `/info`, and the total count of requests served
+- **WHEN** the node connects to WiFi, starts the network services, and the mode is `MODE_SENSOR_DISPLAY`
+- **THEN** the display SHALL show the assigned IPv4 address without protocol prefix, the route `/info`, the total count of requests served, and the last request caller identifier
 
 #### Scenario: WiFi request received
-- **WHEN** an HTTP client requests `/info` and the counter increments
-- **THEN** the display SHALL reflect the updated request counter on its next refresh cycle while in `MODE_SENSOR_DISPLAY`
+- **WHEN** an HTTP or CoAP client sends a request and the counter increments
+- **THEN** the display SHALL reflect the updated request counter and update the last caller indicator on its next refresh cycle while in `MODE_SENSOR_DISPLAY`
 
 #### Scenario: WiFi connecting or disconnected
 - **WHEN** the node is attempting connection or loses connection
