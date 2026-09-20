@@ -41,6 +41,7 @@ WIFI_RETRY_INTERVAL_S = 10
 # Hardware Pin Mappings (GPIO numbers for Pico 2 W / RP2350)
 PIN_DHT22 = 15      # GP15 (Pin 20) - DHT22 Data line
 PIN_BUTTON = 14     # GP14 (Pin 19) - Reset/Acknowledge button (active LOW, internal pull-up)
+PIN_BUTTON_LOG = 13 # GP13 (Pin 17) - Data logger control button (active LOW, internal pull-up)
 PIN_LED_ALERT = "LED" 
 
 SPI_BUS = 0
@@ -71,6 +72,11 @@ DISPLAY_HEIGHT = TFT_HEIGHT
 # Timing & Intervals (in seconds)
 SENSOR_READ_INTERVAL_S = 2.0       # DHT22 requires >= 1-2s between readings
 DISPLAY_REFRESH_INTERVAL_S = 1.0
+SENSOR_LOG_INTERVAL_S = 300        # Periodic logging sample interval (5 minutes)
+LOG_FLUSH_INTERVAL_S = 3600        # SD card auto-flush interval (1 hour)
+
+# Data Logger Storage Configuration
+LOG_SD_ROOT = "/sensor-data"
 
 # HTTP Server Configuration
 HTTP_PORT = 80

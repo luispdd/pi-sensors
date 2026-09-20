@@ -8,6 +8,12 @@ MODE_SENSOR_DISPLAY = 0
 MODE_SEMI_SLEEP = 1
 MODE_MESSAGE = 2
 
+# Data Logger State Constants
+LOGGER_IDLE = 0
+LOGGER_STAGING = 1
+LOGGER_CONFIRM = 2
+LOGGER_ACTIVE = 3
+
 
 class AppState:
     def __init__(self):
@@ -25,6 +31,39 @@ class AppState:
         self.last_caller = None
         self.known_nodes = {}
         self._start_time = time.time()
+
+        # Data Logger State & Buffers
+        self.logger_state = LOGGER_IDLE
+        self.logging_active = False
+        self.log_buffers = {}
+        self.log_buffered_count = 0
+        self.log_ntp_time_str = None
+        self.log_error = None
+        self.log_active_nodes = {}
+
+    def buffer_reading(self, device_id, ts, temp, hum):
+        """Appends reading to log_buffers[device_id] (max 12), and increments log_buffered_count."""
+        if device_id not in self.log_buffers:
+            self.log_buffers[device_id] = []
+        buf = self.log_buffers[device_id]
+        if len(buf) >= 12:
+            buf.pop(0)
+        else:
+            self.log_buffered_count += 1
+        buf.append({"ts": ts, "device_id": device_id, "temp": temp, "hum": hum})
+
+    def clear_buffers(self):
+        """Resets in-memory log buffers and counter."""
+        self.log_buffers = {}
+        self.log_buffered_count = 0
+
+    def set_logger_error(self, msg):
+        """Sets logger error message to be displayed."""
+        self.log_error = str(msg)
+
+    def clear_logger_error(self):
+        """Clears logger error message."""
+        self.log_error = None
 
     def enter_sensor_mode(self):
         """Transitions state to sensor display mode, clearing any alerts or pending messages."""

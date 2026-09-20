@@ -59,15 +59,17 @@ class OLEDDisplay:
             except Exception as e:
                 print(f"[display] Power off error: {e}")
 
+    MAX_LINE_LEN = 16 # Length of a line in characters for ssd1306 128x64 OLED display (8x5 font)
+
     def show_splash(self, title="Pico Station", subtitle="Starting..."):
         """Displays a startup splash screen."""
         if self.oled is None:
             return
         try:
             self.oled.fill(0)
-            self.oled.text(title[:16], 0, 16)
+            self.oled.text(title[:  self.MAX_LINE_LEN], 0, 16)
             self.oled.hline(0, 30, self.width, 1)
-            self.oled.text(subtitle[:16], 0, 38)
+            self.oled.text(subtitle[:self.MAX_LINE_LEN], 0, 38)
             self.oled.show()
         except Exception as e:
             print(f"[display] Splash error: {e}")
@@ -86,12 +88,12 @@ class OLEDDisplay:
             self.oled.text("[Message]", 0, 0)
             self.oled.hline(0, 10, self.width, 1)
 
-            # Simple line wrapping for 16 chars per line
+            # Simple line wrapping for max_line_len chars per line
             lines = []
             for raw_line in text.split("\n"):
-                while len(raw_line) > 16:
-                    lines.append(raw_line[:16])
-                    raw_line = raw_line[16:]
+                while len(raw_line) > self.MAX_LINE_LEN:
+                    lines.append(raw_line[:self.MAX_LINE_LEN])
+                    raw_line = raw_line[self.MAX_LINE_LEN:]
                 lines.append(raw_line)
 
             y = 14
@@ -136,30 +138,30 @@ class OLEDDisplay:
             t_str = f"{temp:.1f}C" if temp is not None else "--.-C"
             h_str = f"{hum:.0f}%" if hum is not None else "--%"
             line0 = f"T:{t_str} H:{h_str}"
-            self.oled.text(line0[:16], 0, 2)
+            self.oled.text(line0[:self.MAX_LINE_LEN], 0, 2)
 
             # Line 1 & Line 2: Network info / Route / Error (y=16, y=28)
             if config_error or wifi_status == "config_error":
                 err_msg = config_error if config_error else "Config Error"
-                self.oled.text(err_msg[:16], 0, 16)
+                self.oled.text(err_msg[:self.MAX_LINE_LEN], 0, 16)
                 self.oled.text("Check secrets.py", 0, 28)
             elif ip and wifi_status == "connected":
                 clean_ip = str(ip).replace("http://", "").replace("https://", "").strip()
-                self.oled.text(clean_ip[:16], 0, 16)
+                self.oled.text(clean_ip[:self.MAX_LINE_LEN], 0, 16)
                 self.oled.text("/info", 0, 28)
             else:
                 status_label = "Connecting..." if wifi_status == "connecting" else "WiFi: Offline"
-                self.oled.text(status_label[:16], 0, 16)
+                self.oled.text(status_label[:self.MAX_LINE_LEN], 0, 16)
                 self.oled.text("Waiting for net", 0, 28)
 
             # Line 3: Request count (y=40)
             line3 = f"Reqs: {requests_served}"
-            self.oled.text(line3[:16], 0, 40)
+            self.oled.text(line3[:self.MAX_LINE_LEN], 0, 40)
 
             # Line 4: Last caller (y=52)
             caller_str = str(last_caller) if last_caller else "--"
             line4 = f"Last: {caller_str}"
-            self.oled.text(line4[:16], 0, 52)
+            self.oled.text(line4[:self.MAX_LINE_LEN], 0, 52)
 
             self.oled.show()
         except Exception as e:
