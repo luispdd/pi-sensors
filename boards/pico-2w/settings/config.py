@@ -39,6 +39,7 @@ def has_valid_credentials():
 WIFI_RETRY_INTERVAL_S = 10
 
 # Hardware Pin Mappings (GPIO numbers for Pico 2 W / RP2350)
+PIN_DHT22 = 15      # GP15 (Pin 20) - DHT22 Data line
 PIN_BUTTON = 14     # GP14 (Pin 19) - Reset/Acknowledge button (active LOW, internal pull-up)
 PIN_LED_ALERT = "LED" 
 
@@ -68,7 +69,7 @@ DISPLAY_WIDTH = TFT_WIDTH
 DISPLAY_HEIGHT = TFT_HEIGHT
 
 # Timing & Intervals (in seconds)
-SENSOR_READ_INTERVAL_S = 2.0
+SENSOR_READ_INTERVAL_S = 2.0       # DHT22 requires >= 1-2s between readings
 DISPLAY_REFRESH_INTERVAL_S = 1.0
 
 # HTTP Server Configuration
