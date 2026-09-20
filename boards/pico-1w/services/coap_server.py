@@ -104,6 +104,7 @@ class CoapServer:
             return
 
         self._record_caller(sender_ip)
+        print(f"[coap-server] Received GET /.well-known/core from {sender_ip}:{sender_port}")
 
         device_id = getattr(config, "DEVICE_ID", config.DEFAULT_DEVICE_ID)
         device_type = getattr(config, "DEVICE_TYPE", config.DEFAULT_DEVICE_TYPE)
@@ -126,6 +127,7 @@ class CoapServer:
             COAP_CONTENT_FORMAT.COAP_APPLICATION_LINK_FORMAT,
             packet.token, request_packet=packet,
         )
+        print(f"[coap-server] Sent link-format response to {sender_ip}:{sender_port}")
 
     def _handle_id(self, packet, sender_ip, sender_port):
         if packet.method != COAP_METHOD.COAP_GET:
@@ -282,14 +284,25 @@ class CoapServer:
     def start(self):
         """Initializes and binds the UDP socket for unicast, broadcast, and CoAP multicast."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        except Exception:
-            pass
-        try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        except Exception:
-            pass
+        # Configure socket options with robust fallbacks for MicroPython ports
+        sol_socket = getattr(socket, "SOL_SOCKET", 1)
+        so_reuseaddr = getattr(socket, "SO_REUSEADDR", 2)
+        so_broadcast = getattr(socket, "SO_BROADCAST", 0x20)
+
+        for lvl in (sol_socket, 1, 0xFFFF):
+            try:
+                sock.setsockopt(lvl, so_reuseaddr, 1)
+                break
+            except Exception:
+                pass
+
+        for lvl in (sol_socket, 1, 0xFFFF):
+            try:
+                sock.setsockopt(lvl, so_broadcast, 1)
+                break
+            except Exception:
+                pass
+
         sock.bind(("0.0.0.0", self.port))
         # Join CoAP IPv4 multicast group (RFC 7252 §12.8) so the board receives
         # discovery requests sent to 224.0.1.187 in addition to broadcast.
