@@ -47,7 +47,11 @@ for p in ('', '/', '/lib', '..', 'src', '/src', 'src/lib', '/src/lib'):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from machine import SPI, Pin
+try:
+    from machine import SPI, Pin
+except ImportError:
+    import unittest
+    raise unittest.SkipTest("MicroPython hardware test (skipped on host)")
 from settings import config
 
 # ── helpers ──────────────────────────────────────────────────────────────────

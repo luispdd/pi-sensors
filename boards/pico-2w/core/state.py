@@ -42,15 +42,26 @@ class AppState:
         self.log_active_nodes = {}
 
     def buffer_reading(self, device_id, ts, temp, hum):
-        """Appends reading to log_buffers[device_id] (max 12), and increments log_buffered_count."""
+        """Appends reading to log_buffers[device_id] (max 13), and increments log_buffered_count."""
         if device_id not in self.log_buffers:
             self.log_buffers[device_id] = []
         buf = self.log_buffers[device_id]
-        if len(buf) >= 12:
+        if len(buf) >= 13:
             buf.pop(0)
         else:
             self.log_buffered_count += 1
         buf.append({"ts": ts, "device_id": device_id, "temp": temp, "hum": hum})
+
+    def retain_unflushed(self, count_flushed_per_device=12):
+        """Retains entries beyond the first count_flushed_per_device entries in log_buffers,
+
+        updating log_buffered_count accordingly.
+        """
+        total = 0
+        for dev_id, buf in list(self.log_buffers.items()):
+            self.log_buffers[dev_id] = buf[count_flushed_per_device:]
+            total += len(self.log_buffers[dev_id])
+        self.log_buffered_count = total
 
     def clear_buffers(self):
         """Resets in-memory log buffers and counter."""

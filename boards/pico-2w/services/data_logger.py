@@ -187,6 +187,10 @@ class DataLogger:
         poll_interval = getattr(config, "SENSOR_LOG_INTERVAL_S", 300)
         flush_interval = getattr(config, "LOG_FLUSH_INTERVAL_S", 3600)
 
+        # Immediate measurement on session start before entering sleep cycle
+        if self.app_state.logging_active:
+            await self.poll_and_buffer()
+
         elapsed_since_flush = 0
         while self.app_state.logging_active:
             # Check for midnight crossing for NTP re-sync
@@ -228,7 +232,8 @@ class DataLogger:
             # Aggregate all buffers into a single list
             all_rows = []
             for device_id, rows in buffers.items():
-                for r in rows:
+                rows_to_flush = rows if end_session else rows[:12]
+                for r in rows_to_flush:
                     if isinstance(r, dict):
                         r_copy = dict(r)
                         if "device_id" not in r_copy:
@@ -250,12 +255,14 @@ class DataLogger:
                 await asyncio.sleep(0.05)
                 self.sd_storage.flush_buffers(all_rows, date_str)
 
-            self.app_state.clear_buffers()
-            self.app_state.clear_logger_error()
-
             if end_session:
+                self.app_state.clear_buffers()
                 self.app_state.logger_state = LOGGER_IDLE
                 self.app_state.logging_active = False
+            else:
+                self.app_state.retain_unflushed(count_flushed_per_device=12)
+
+            self.app_state.clear_logger_error()
 
             return True
         except Exception as e:

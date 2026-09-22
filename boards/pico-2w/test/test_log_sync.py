@@ -5,12 +5,13 @@ import shutil
 import tempfile
 import unittest
 
-from boards.pico_2w.services.log_sync import (
-    get_log_files,
-    parse_cursor,
-    get_next_file,
-    read_log_records,
-) if False else None  # Dynamic import below to handle path differences
+if False:
+    from boards.pico_2w.services.log_sync import (
+        get_log_files,
+        parse_cursor,
+        get_next_file,
+        read_log_records,
+    )
 
 
 class TestLogSync(unittest.TestCase):
