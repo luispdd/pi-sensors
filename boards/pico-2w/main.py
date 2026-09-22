@@ -215,7 +215,7 @@ async def main():
 
     # SD Storage and CoAP Server for DataLogger
     sd_storage = SDStorage(spi=display.spi, tft_cs=getattr(display.tft, "cs", config.TFT_CS))
-    coap_server = CoapServer(app_state, reader=reader, port=config.COAP_PORT)
+    coap_server = CoapServer(app_state, reader=reader, sd_storage=sd_storage, port=config.COAP_PORT)
     data_logger = DataLogger(app_state, sd_storage, coap_server)
 
     net_mgr = NetworkManager()

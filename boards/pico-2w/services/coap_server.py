@@ -5,6 +5,7 @@ import struct
 import sys
 from settings import config
 from core.state import MODE_SEMI_SLEEP
+from services.log_sync import read_log_records
 
 try:
     import socket
@@ -70,9 +71,10 @@ def get_subnet_broadcast():
 
 
 class CoapServer:
-    def __init__(self, app_state, reader=None, port=getattr(config, "COAP_PORT", 5683)):
+    def __init__(self, app_state, reader=None, sd_storage=None, port=getattr(config, "COAP_PORT", 5683)):
         self.app_state = app_state
         self.reader = reader
+        self.sd_storage = sd_storage
         self.port = port
         self.coap = microcoapy.Coap()
         self.coap.debug = False
@@ -88,6 +90,7 @@ class CoapServer:
             ("sensors/humidity", self._handle_sensor_humidity),
             ("display", self._handle_display),
             ("logger", self._handle_logger),
+            ("log", self._handle_log),
         ]
         for path, handler in routes:
             self.coap.addIncomingRequestCallback(path, handler)
@@ -248,7 +251,8 @@ class CoapServer:
             '</sensors/temperature>;rt="temperature";if="sensor",'
             '</sensors/humidity>;rt="humidity";if="sensor",'
             '</display>;rt="display";if="actuator",'
-            '</logger>;rt="data-logger";if="logger"'
+            '</logger>;rt="data-logger";if="logger",'
+            '</log>;rt="data-sync";if="logger"'
         )
 
         self.coap.sendResponse(
@@ -433,6 +437,91 @@ class CoapServer:
             COAP_CONTENT_FORMAT.COAP_TEXT_PLAIN,
             packet.token, request_packet=packet,
         )
+
+    def _send_bad_request(self, packet, sender_ip, sender_port, msg="Bad Request"):
+        self.coap.sendResponse(
+            sender_ip,
+            sender_port,
+            packet.messageid,
+            msg,
+            COAP_RESPONSE_CODE.COAP_BAD_REQUEST,
+            COAP_CONTENT_FORMAT.COAP_TEXT_PLAIN,
+            packet.token, request_packet=packet,
+        )
+
+    def _extract_query_params(self, packet):
+        """Extracts URI query parameters from CoAP packet options."""
+        params = {}
+        if not hasattr(packet, "options") or not packet.options:
+            return params
+        for opt in packet.options:
+            if getattr(opt, "number", None) == 15:  # COAP_OPTION_NUMBER.COAP_URI_QUERY
+                try:
+                    if isinstance(opt.buffer, (bytes, bytearray)):
+                        query_str = opt.buffer.decode("utf-8")
+                    else:
+                        query_str = str(opt.buffer)
+                except Exception:
+                    continue
+                for item in query_str.split("&"):
+                    if "=" in item:
+                        k, v = item.split("=", 1)
+                        params[k.strip()] = v.strip()
+                    elif item.strip():
+                        params[item.strip()] = ""
+        return params
+
+    def _handle_log(self, packet, sender_ip, sender_port):
+        if packet.method != COAP_METHOD.COAP_GET:
+            self._send_method_not_allowed(packet, sender_ip, sender_port)
+            return
+
+        self._record_caller(sender_ip)
+        params = self._extract_query_params(packet)
+
+        if "size" not in params:
+            print(f"[coap-server] GET /log missing mandatory 'size' param from {sender_ip}")
+            self._send_bad_request(packet, sender_ip, sender_port, "Missing size parameter")
+            return
+
+        try:
+            size = int(params["size"])
+            if size <= 0:
+                raise ValueError("size must be positive")
+        except ValueError:
+            self._send_bad_request(packet, sender_ip, sender_port, "Invalid size parameter")
+            return
+
+        cursor = params.get("cursor")
+
+        # Read logs from SD card
+        if self.sd_storage is not None:
+            try:
+                self.sd_storage.mount()
+            except Exception as e:
+                print(f"[coap-server] SD mount failed during /log: {e}")
+            try:
+                dir_path = f"{self.sd_storage.mount_point}{config.LOG_SD_ROOT}"
+                result = read_log_records(dir_path, cursor, size)
+            finally:
+                try:
+                    self.sd_storage.unmount()
+                except Exception:
+                    pass
+        else:
+            dir_path = f"/sd{config.LOG_SD_ROOT}"
+            result = read_log_records(dir_path, cursor, size)
+
+        self.coap.sendResponse(
+            sender_ip,
+            sender_port,
+            packet.messageid,
+            json.dumps(result),
+            COAP_RESPONSE_CODE.COAP_CONTENT,
+            COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
+            packet.token, request_packet=packet,
+        )
+        print(f"[coap-server] Sent /log response to {sender_ip}:{sender_port} (rows={len(result['data'])}, next_cursor={result['next_cursor']})")
 
     def start(self):
         """Initializes and binds the UDP socket for unicast, broadcast, and CoAP multicast."""

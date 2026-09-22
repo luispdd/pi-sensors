@@ -17,6 +17,7 @@ from hardware.sensors import SensorReader, get_sensor_reader
 from core.state import AppState, MODE_SENSOR_DISPLAY, MODE_SEMI_SLEEP, MODE_MESSAGE
 from services.webserver import WebServer
 from services.coap_server import CoapServer
+from services.ntp_service import sync_ntp, get_utc_iso_timestamp, NTPTracker
 
 try:
     import uasyncio as asyncio
@@ -29,7 +30,13 @@ async def sensor_task(app_state: AppState, reader: SensorReader):
     while True:
         try:
             if app_state.mode != MODE_SEMI_SLEEP:
+                prev_errors = reader.read_errors
                 data = reader.read_sensors()
+                if reader.read_errors == prev_errors and app_state.ntp_synced:
+                    data["timestamp"] = get_utc_iso_timestamp()
+                    reader.last_timestamp = data["timestamp"]
+                else:
+                    data["timestamp"] = reader.last_timestamp
                 app_state.update_sensors(data)
                 await asyncio.sleep(config.SENSOR_READ_INTERVAL_S)
             else:
@@ -146,6 +153,27 @@ async def coap_task(app_state: AppState, reader: SensorReader = None):
         print(f"[main] Error in coap_task: {e}")
 
 
+async def ntp_task(app_state: AppState):
+    """Synchronizes NTP clock on boot once WiFi is connected, and periodically."""
+    ntp_tracker = NTPTracker()
+    while True:
+        try:
+            if app_state.wifi_status == "connected":
+                if not app_state.ntp_synced:
+                    success, res = sync_ntp()
+                    if success:
+                        app_state.ntp_synced = True
+                        print(f"[ntp] Initial NTP sync successful: {res}")
+                    else:
+                        print(f"[ntp] Initial NTP sync failed: {res}")
+                else:
+                    ntp_tracker.check_and_resync(app_state)
+            await asyncio.sleep(10.0 if not app_state.ntp_synced else 60.0)
+        except Exception as e:
+            print(f"[main] Error in ntp task: {e}")
+            await asyncio.sleep(30.0)
+
+
 async def main():
     print("=== Raspberry Pi Pico W Sensor Station ===")
     app_state = AppState()
@@ -160,6 +188,8 @@ async def main():
     reader = get_sensor_reader()
     # Perform immediate initial sensor reading
     init_data = reader.read_sensors()
+    if app_state.ntp_synced:
+        init_data["timestamp"] = get_utc_iso_timestamp()
     app_state.update_sensors(init_data)
 
     net_mgr = NetworkManager()
@@ -172,9 +202,10 @@ async def main():
     t_server = asyncio.create_task(server_task(app_state, reader))
     t_coap = asyncio.create_task(coap_task(app_state, reader))
     t_button = asyncio.create_task(button_task(app_state, button, led, oled))
+    t_ntp = asyncio.create_task(ntp_task(app_state))
 
     # Keep main coroutine alive
-    await asyncio.gather(t_sensors, t_display, t_network, t_server, t_coap, t_button)
+    await asyncio.gather(t_sensors, t_display, t_network, t_server, t_coap, t_button, t_ntp)
 
 
 if __name__ == "__main__":

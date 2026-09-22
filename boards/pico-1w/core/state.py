@@ -13,6 +13,8 @@ class AppState:
     def __init__(self):
         self.temperature_c = None
         self.humidity_pct = None
+        self.timestamp = None
+        self.ntp_synced = False
         self.requests_served = 0
         self.ip_address = None
         self.wifi_status = "config_error" if getattr(config, "WIFI_CONFIG_ERROR", None) else "disconnected"
@@ -110,12 +112,15 @@ class AppState:
         self.temperature_c = sensor_data.get("temperature_c", self.temperature_c)
         self.humidity_pct = sensor_data.get("humidity_pct", self.humidity_pct)
         self.read_errors = sensor_data.get("read_errors", self.read_errors)
+        if "timestamp" in sensor_data:
+            self.timestamp = sensor_data["timestamp"]
 
     def to_dict(self):
         """Returns the dictionary representation for JSON API responses."""
         return {
             "temperature_c": self.temperature_c,
             "humidity_pct": self.humidity_pct,
+            "timestamp": self.timestamp,
             "requests_served": self.requests_served,
             "uptime_s": self.get_uptime_s(),
             "status": "ok",

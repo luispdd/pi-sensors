@@ -5,6 +5,7 @@ import struct
 import sys
 from settings import config
 from core.state import MODE_SEMI_SLEEP
+from services.ntp_service import get_utc_iso_timestamp
 
 try:
     import socket
@@ -158,13 +159,20 @@ class CoapServer:
         self._record_caller(sender_ip)
 
         if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
+            prev_errors = self.reader.read_errors
             data = self.reader.read_sensors()
+            if self.reader.read_errors == prev_errors and self.app_state.ntp_synced:
+                data["timestamp"] = get_utc_iso_timestamp()
+                self.reader.last_timestamp = data["timestamp"]
+            else:
+                data["timestamp"] = getattr(self.reader, "last_timestamp", None)
             self.app_state.update_sensors(data)
 
         senml = {
             "n": "temperature",
             "u": "Cel",
             "v": self.app_state.temperature_c,
+            "t": self.app_state.timestamp,
         }
         self.coap.sendResponse(
             sender_ip,
@@ -184,13 +192,20 @@ class CoapServer:
         self._record_caller(sender_ip)
 
         if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
+            prev_errors = self.reader.read_errors
             data = self.reader.read_sensors()
+            if self.reader.read_errors == prev_errors and self.app_state.ntp_synced:
+                data["timestamp"] = get_utc_iso_timestamp()
+                self.reader.last_timestamp = data["timestamp"]
+            else:
+                data["timestamp"] = getattr(self.reader, "last_timestamp", None)
             self.app_state.update_sensors(data)
 
         senml = {
             "n": "humidity",
             "u": "%RH",
             "v": self.app_state.humidity_pct,
+            "t": self.app_state.timestamp,
         }
         self.coap.sendResponse(
             sender_ip,
@@ -210,13 +225,19 @@ class CoapServer:
         self._record_caller(sender_ip)
 
         if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
+            prev_errors = self.reader.read_errors
             data = self.reader.read_sensors()
+            if self.reader.read_errors == prev_errors and self.app_state.ntp_synced:
+                data["timestamp"] = get_utc_iso_timestamp()
+                self.reader.last_timestamp = data["timestamp"]
+            else:
+                data["timestamp"] = getattr(self.reader, "last_timestamp", None)
             self.app_state.update_sensors(data)
 
         # SenML Pack (JSON array) without light
         pack = [
-            {"n": "temperature", "u": "Cel", "v": self.app_state.temperature_c},
-            {"n": "humidity", "u": "%RH", "v": self.app_state.humidity_pct},
+            {"n": "temperature", "u": "Cel", "v": self.app_state.temperature_c, "t": self.app_state.timestamp},
+            {"n": "humidity", "u": "%RH", "v": self.app_state.humidity_pct, "t": self.app_state.timestamp},
         ]
         self.coap.sendResponse(
             sender_ip,

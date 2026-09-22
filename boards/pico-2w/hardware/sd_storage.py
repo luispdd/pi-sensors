@@ -113,15 +113,20 @@ class SDStorage:
                 # Directory already exists or cannot be created
                 pass
 
-    def open_daily_file(self, device_id, date_str):
-        """Opens /sd/sensor-data/<date_str>-<device_id>.csv in append mode.
+    def open_daily_file(self, date_str, device_id=None):
+        """Opens /sd/sensor-data/<date_str>.csv in append mode.
 
         Writes the CSV header if the file is newly created (size == 0).
         Returns the open file handle.
         """
+        # Support flexible argument order if called as (device_id, date_str)
+        if device_id is not None:
+            if isinstance(device_id, str) and len(device_id) == 10 and device_id[4] == "-" and device_id[7] == "-":
+                date_str = device_id
+
         dir_path = f"{self.mount_point}{config.LOG_SD_ROOT}"
         self.ensure_dir(dir_path)
-        file_path = f"{dir_path}/{date_str}-{device_id}.csv"
+        file_path = f"{dir_path}/{date_str}.csv"
 
         # Check if file exists and has content
         file_exists = False
@@ -163,28 +168,35 @@ class SDStorage:
         file_handle.flush()
 
     def flush_buffers(self, buffers, date_str):
-        """Mounts SD, iterates buffers dict {device_id: [rows]}, writes daily files, and unmounts.
+        """Mounts SD, writes rows to the unified daily file <date_str>.csv, and unmounts.
 
+        buffers can be:
+        - A list of row dicts/tuples (already sorted)
+        - A dict {device_id: [rows]}
         Returns True on success, or raises Exception on failure.
         """
         self.mount()
         try:
-            for device_id, rows in buffers.items():
-                if not rows:
-                    continue
-                # Ensure device_id is present on rows if passed without it
-                enriched_rows = []
-                for r in rows:
-                    if isinstance(r, dict) and "device_id" not in r:
-                        r_copy = dict(r)
-                        r_copy["device_id"] = device_id
-                        enriched_rows.append(r_copy)
-                    else:
-                        enriched_rows.append(r)
+            if isinstance(buffers, list):
+                rows_to_write = buffers
+            elif isinstance(buffers, dict):
+                rows_to_write = []
+                for device_id, rows in buffers.items():
+                    for r in rows:
+                        if isinstance(r, dict) and "device_id" not in r:
+                            r_copy = dict(r)
+                            r_copy["device_id"] = device_id
+                            rows_to_write.append(r_copy)
+                        else:
+                            rows_to_write.append(r)
+                rows_to_write.sort(key=lambda r: (r.get("ts", "") if isinstance(r, dict) else r[0], r.get("device_id", "") if isinstance(r, dict) else r[1]))
+            else:
+                rows_to_write = []
 
-                f = self.open_daily_file(device_id, date_str)
+            if rows_to_write:
+                f = self.open_daily_file(date_str)
                 try:
-                    self.write_rows(f, enriched_rows)
+                    self.write_rows(f, rows_to_write)
                 finally:
                     f.close()
             return True

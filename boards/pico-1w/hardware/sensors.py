@@ -19,6 +19,7 @@ class SensorReader:
 
         self.last_temp = None
         self.last_humidity = None
+        self.last_timestamp = None
         self.read_errors = 0
 
         self._dht_sensor = None
@@ -36,6 +37,7 @@ class SensorReader:
         - temperature_c: float or None
         - humidity_pct: float or None
         - read_errors: int
+        - timestamp: str or None
         """
         # Read DHT22
         if self._dht_sensor is not None:
@@ -51,6 +53,7 @@ class SensorReader:
             "temperature_c": self.last_temp,
             "humidity_pct": self.last_humidity,
             "read_errors": self.read_errors,
+            "timestamp": self.last_timestamp,
         }
 
 

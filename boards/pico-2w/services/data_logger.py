@@ -79,7 +79,8 @@ class DataLogger:
         if local_ip in self.app_state.log_active_nodes or local_id in self.app_state.log_active_nodes.values():
             temp = self.app_state.temperature_c
             hum = self.app_state.humidity_pct
-            self.app_state.buffer_reading(local_id, ts, temp, hum)
+            local_ts = getattr(self.app_state, "timestamp", None) or ts
+            self.app_state.buffer_reading(local_id, local_ts, temp, hum)
 
         # 2. Remote boards
         for ip, dev_id in list(self.app_state.log_active_nodes.items()):
@@ -88,12 +89,13 @@ class DataLogger:
 
             # Request /sensors from remote node via CoAP (with HTTP fallback)
             try:
-                temp_hum = await self._fetch_remote_sensor(ip)
-                if temp_hum is None:
-                    temp_hum = self._fetch_remote_sensor_http(ip)
-                if temp_hum is not None:
-                    t, h = temp_hum
-                    self.app_state.buffer_reading(dev_id, ts, t, h)
+                res = await self._fetch_remote_sensor(ip)
+                if res is None:
+                    res = self._fetch_remote_sensor_http(ip)
+                if res is not None:
+                    t, h, remote_ts = res
+                    reading_ts = remote_ts if remote_ts else ts
+                    self.app_state.buffer_reading(dev_id, reading_ts, t, h)
             except Exception as e:
                 # Silently skip on error/timeout per requirement
                 pass
@@ -125,13 +127,14 @@ class DataLogger:
                 parsed = json.loads(body)
                 t = parsed.get("temperature_c") or parsed.get("temperature") or parsed.get("temp")
                 h = parsed.get("humidity_pct") or parsed.get("humidity") or parsed.get("hum")
-                return (t, h)
+                remote_ts = parsed.get("timestamp") or parsed.get("ts") or parsed.get("time") or parsed.get("t")
+                return (t, h, remote_ts)
         except Exception as e:
             print(f"[logger] HTTP sensor fetch from {ip} failed: {e}")
         return None
 
     async def _fetch_remote_sensor(self, ip, port=5683, timeout_s=2.0):
-        """Fetches /sensors from remote board and returns (temp, hum) or None on timeout/error."""
+        """Fetches /sensors from remote board and returns (temp, hum, ts) or None on timeout/error."""
         # Try CoAP GET /sensors using client UDP socket (RFC 7252 NON GET /sensors)
         try:
             try:
@@ -154,19 +157,26 @@ class DataLogger:
             if b"\xff" in data:
                 payload_str = data.split(b"\xff", 1)[1].decode("utf-8", "ignore")
                 data_json = json.loads(payload_str)
-                t, h = None, None
+                t, h, remote_ts = None, None, None
                 if isinstance(data_json, list):
                     for item in data_json:
                         if isinstance(item, dict):
                             if item.get("n") == "temperature":
                                 t = item.get("v")
+                                if not remote_ts:
+                                    remote_ts = item.get("t") or item.get("ts")
                             elif item.get("n") == "humidity":
                                 h = item.get("v")
+                                if not remote_ts:
+                                    remote_ts = item.get("t") or item.get("ts")
+                            elif item.get("n") in ("time", "timestamp"):
+                                remote_ts = item.get("vs") or item.get("v") or item.get("t")
                 elif isinstance(data_json, dict):
                     t = data_json.get("temperature") or data_json.get("temp")
                     h = data_json.get("humidity") or data_json.get("hum")
+                    remote_ts = data_json.get("timestamp") or data_json.get("ts") or data_json.get("time") or data_json.get("t")
                 if t is not None or h is not None:
-                    return (t, h)
+                    return (t, h, remote_ts)
         except Exception as e:
             print(f"[logger] CoAP sensor fetch from {ip} failed: {e}")
 
@@ -215,10 +225,30 @@ class DataLogger:
             if not buffers and not end_session:
                 return True
 
-            if self.sd_storage is not None and buffers:
+            # Aggregate all buffers into a single list
+            all_rows = []
+            for device_id, rows in buffers.items():
+                for r in rows:
+                    if isinstance(r, dict):
+                        r_copy = dict(r)
+                        if "device_id" not in r_copy:
+                            r_copy["device_id"] = device_id
+                        all_rows.append(r_copy)
+                    else:
+                        all_rows.append({
+                            "ts": r[0],
+                            "device_id": device_id if len(r) < 2 else r[1],
+                            "temp": r[2] if len(r) > 2 else None,
+                            "hum": r[3] if len(r) > 3 else None,
+                        })
+
+            # Strictly sort by (ts, device_id)
+            all_rows.sort(key=lambda r: (r["ts"], r["device_id"]))
+
+            if self.sd_storage is not None and all_rows:
                 # Yield to let any pending display updates finish
                 await asyncio.sleep(0.05)
-                self.sd_storage.flush_buffers(buffers, date_str)
+                self.sd_storage.flush_buffers(all_rows, date_str)
 
             self.app_state.clear_buffers()
             self.app_state.clear_logger_error()

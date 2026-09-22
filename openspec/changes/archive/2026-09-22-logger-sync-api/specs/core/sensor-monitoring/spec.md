@@ -1,10 +1,4 @@
-# Sensor Monitoring Specification
-
-## Purpose
-
-Provides periodic environmental telemetry by acquiring ambient temperature and relative humidity measurements from connected sensors.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Periodic DHT22 sensor readings
 The system SHALL sample temperature (in Celsius) and relative humidity (percentage) from the DHT22 sensor on GP15 at regular intervals of at least 1 second when the display mode is `MODE_SENSOR_DISPLAY` or `MODE_MESSAGE`. When the mode is `MODE_SEMI_SLEEP`, continuous periodic sampling SHALL be suspended.
