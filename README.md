@@ -15,8 +15,8 @@ Located in `boards/pico-1w/`.
 ### 2. `pico-2w` — Pico 2 W TFT Display & SD Card Node
 Located in `boards/pico-2w/`.
 - **Microcontroller**: Raspberry Pi Pico 2 W (RP2350)
-- **Peripherals**: ST7735 TFT color display (128x160), MicroSD card reader sharing hardware **SPI0** with bus arbitration.
-- **Capabilities**: WiFi connectivity, CoAP IoTMesh server with display actuator, HTTP server, ST7735 TFT telemetry & alert rendering.
+- **Peripherals**: ST7735 TFT color display (128x160), MicroSD card reader sharing hardware **SPI0** with bus arbitration, DHT22 temperature/humidity sensor, and Adafruit ALS-PT19 (ADA2748) analog ambient light sensor.
+- **Capabilities**: WiFi connectivity, CoAP IoTMesh server with display actuator, HTTP server, ST7735 TFT telemetry & alert rendering, persistent SD card logging.
 
 ---
 
@@ -38,6 +38,10 @@ Located in `boards/pico-2w/`.
 ### `pico-2w` (Raspberry Pi Pico 2 W)
 | Peripheral | Signal | Pico 2 W Pin (GPIO) | Physical Pin | Notes |
 |---|---|---|---|---|
+| **DHT22** | DATA | GP15 | Pin 20 | Temperature & Humidity data line |
+| **ADA2748 Light Sensor**| OUT | GP26 (ADC0) | Pin 31 | Analog ambient light voltage |
+| | VCC (+) | 3V3 OUT | Pin 36 | 3.3V Power |
+| | GND (-) | GND | Pin 38 | Ground |
 | **Shared SPI0** | SCK | GP18 | Pin 24 | Shared clock line |
 | **Shared SPI0** | MOSI | GP19 | Pin 25 | Shared data out line |
 | **Shared SPI0** | MISO | GP16 | Pin 21 | SD MISO line |
@@ -45,6 +49,8 @@ Located in `boards/pico-2w/`.
 | **ST7735 TFT** | DC | GP20 | Pin 26 | Command/Data toggle |
 | **ST7735 TFT** | RESET | GP21 | Pin 27 | Active LOW reset |
 | **SD Card** | CS | GP22 | Pin 29 | Active LOW |
+| **Button (Reset)** | Signal | GP14 | Pin 19 | Active LOW, internal pull-up |
+| **Button (Logger)**| Signal | GP13 | Pin 17 | Active LOW, internal pull-up |
 
 ---
 
@@ -64,11 +70,12 @@ HTTP/1.1 200 OK
 Content-Type: application/json
 Access-Control-Allow-Origin: *
 Connection: close
-Content-Length: 98
+Content-Length: 118
 
 {
   "temperature_c": 22.4,
   "humidity_pct": 58.1,
+  "light_pct": 50.0,
   "requests_served": 1,
   "uptime_s": 42,
   "status": "ok"
@@ -87,6 +94,13 @@ coap-client -m get coap://<NODE_IP>/.well-known/core
 #### Sensor Collection (`GET /sensors`)
 ```bash
 coap-client -m get coap://<NODE_IP>/sensors
+```
+
+#### Dedicated Sensor Endpoints
+```bash
+coap-client -m get coap://<NODE_IP>/sensors/temperature
+coap-client -m get coap://<NODE_IP>/sensors/humidity
+coap-client -m get coap://<NODE_IP>/sensors/light
 ```
 
 #### Trigger Display Alert (`POST /display`)

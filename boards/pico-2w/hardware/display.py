@@ -192,6 +192,7 @@ class TFTDisplay:
         self,
         temp=None,
         hum=None,
+        light=None,
         ip=None,
         wifi_status="connected",
         requests_served=0,
@@ -220,7 +221,8 @@ class TFTDisplay:
             # Telemetry Line (starts near top now that header is removed)
             t_str = f"{temp:.1f}C" if temp is not None else "--.-C"
             h_str = f"{hum:.0f}%" if hum is not None else "--%"
-            line0 = f"T:{t_str} H:{h_str}"
+            l_str = f"{light:.0f}%" if light is not None else "--%"
+            line0 = f"T:{t_str} H:{h_str} L:{l_str}"
             self.tft.text((5, 8), line0, TFT.GREEN, sysfont, 1)
 
             # Network Status
@@ -315,6 +317,7 @@ class TFTDisplay:
         self.render_status(
             temp=app_state.temperature_c,
             hum=app_state.humidity_pct,
+            light=getattr(app_state, "light_pct", None),
             ip=app_state.ip_address,
             wifi_status=app_state.wifi_status,
             requests_served=app_state.requests_served,
@@ -332,6 +335,7 @@ class TFTDisplay:
         self,
         temp=None,
         hum=None,
+        light=None,
         ip=None,
         wifi_status="connected",
         requests_served=0,
@@ -348,6 +352,7 @@ class TFTDisplay:
             self.render_status(
                 temp=temp,
                 hum=hum,
+                light=light,
                 ip=ip,
                 wifi_status=wifi_status,
                 requests_served=requests_served,

@@ -88,6 +88,7 @@ class CoapServer:
             ("sensors", self._handle_sensors_collection),
             ("sensors/temperature", self._handle_sensor_temperature),
             ("sensors/humidity", self._handle_sensor_humidity),
+            ("sensors/light", self._handle_sensor_light),
             ("display", self._handle_display),
             ("logger", self._handle_logger),
             ("log", self._handle_log),
@@ -250,6 +251,7 @@ class CoapServer:
             '</sensors>;rt="sensor-collection";if="sensor",'
             '</sensors/temperature>;rt="temperature";if="sensor",'
             '</sensors/humidity>;rt="humidity";if="sensor",'
+            '</sensors/light>;rt="light";if="sensor",'
             '</display>;rt="display";if="actuator",'
             '</logger>;rt="data-logger";if="logger",'
             '</log>;rt="data-sync";if="logger"'
@@ -374,12 +376,39 @@ class CoapServer:
         pack = [
             {"n": "temperature", "u": "Cel", "v": self.app_state.temperature_c},
             {"n": "humidity", "u": "%RH", "v": self.app_state.humidity_pct},
+            {"n": "light", "u": "%", "v": self.app_state.light_pct},
         ]
         self.coap.sendResponse(
             sender_ip,
             sender_port,
             packet.messageid,
             json.dumps(pack),
+            COAP_RESPONSE_CODE.COAP_CONTENT,
+            COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
+            packet.token, request_packet=packet,
+        )
+
+    def _handle_sensor_light(self, packet, sender_ip, sender_port):
+        if packet.method != COAP_METHOD.COAP_GET:
+            self._send_method_not_allowed(packet, sender_ip, sender_port)
+            return
+
+        self._record_caller(sender_ip)
+
+        if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
+            data = self.reader.read_sensors()
+            self.app_state.update_sensors(data)
+
+        senml = {
+            "n": "light",
+            "u": "%",
+            "v": self.app_state.light_pct,
+        }
+        self.coap.sendResponse(
+            sender_ip,
+            sender_port,
+            packet.messageid,
+            json.dumps(senml),
             COAP_RESPONSE_CODE.COAP_CONTENT,
             COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
             packet.token, request_packet=packet,

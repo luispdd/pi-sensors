@@ -19,6 +19,7 @@ class AppState:
     def __init__(self):
         self.temperature_c = None
         self.humidity_pct = None
+        self.light_pct = None
         self.requests_served = 0
         self.ip_address = None
         self.wifi_status = "config_error" if getattr(config, "WIFI_CONFIG_ERROR", None) else "disconnected"
@@ -41,7 +42,7 @@ class AppState:
         self.log_error = None
         self.log_active_nodes = {}
 
-    def buffer_reading(self, device_id, ts, temp, hum):
+    def buffer_reading(self, device_id, ts, temp, hum, light=None):
         """Appends reading to log_buffers[device_id] (max 13), and increments log_buffered_count."""
         if device_id not in self.log_buffers:
             self.log_buffers[device_id] = []
@@ -50,7 +51,7 @@ class AppState:
             buf.pop(0)
         else:
             self.log_buffered_count += 1
-        buf.append({"ts": ts, "device_id": device_id, "temp": temp, "hum": hum})
+        buf.append({"ts": ts, "device_id": device_id, "temp": temp, "hum": hum, "light": light})
 
     def retain_unflushed(self, count_flushed_per_device=12):
         """Retains entries beyond the first count_flushed_per_device entries in log_buffers,
@@ -159,6 +160,7 @@ class AppState:
         """Updates internal telemetry from a sensors.read_sensors() dict."""
         self.temperature_c = sensor_data.get("temperature_c", self.temperature_c)
         self.humidity_pct = sensor_data.get("humidity_pct", self.humidity_pct)
+        self.light_pct = sensor_data.get("light_pct", self.light_pct)
         self.read_errors = sensor_data.get("read_errors", self.read_errors)
 
     def to_dict(self):
@@ -166,6 +168,7 @@ class AppState:
         return {
             "temperature_c": self.temperature_c,
             "humidity_pct": self.humidity_pct,
+            "light_pct": self.light_pct,
             "requests_served": self.requests_served,
             "uptime_s": self.get_uptime_s(),
             "status": "ok",

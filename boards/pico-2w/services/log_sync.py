@@ -122,12 +122,20 @@ def read_log_records(dir_path, cursor_str, size):
                         except ValueError:
                             hum = None
 
-                        data.append({
+                        record = {
                             "ts": ts,
                             "device_id": dev_id,
                             "temp": temp,
                             "hum": hum,
-                        })
+                        }
+                        if len(parts) >= 5:
+                            try:
+                                light = float(parts[4].strip()) if parts[4].strip() != "" else None
+                            except ValueError:
+                                light = None
+                            record["light"] = light
+
+                        data.append(record)
                     data_line_idx += 1
                     current_line = data_line_idx
 

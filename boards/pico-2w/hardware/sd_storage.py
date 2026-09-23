@@ -16,7 +16,7 @@ except ImportError:
     except ImportError:
         sdcard = None
 
-CSV_HEADER = "timestamp,device_id,temperature_c,humidity_pct\n"
+CSV_HEADER = "timestamp,device_id,temperature_c,humidity_pct,light_pct\n"
 
 
 class SDStorage:
@@ -158,13 +158,16 @@ class SDStorage:
                 dev_id = r.get("device_id", "")
                 temp = r.get("temp", "")
                 hum = r.get("hum", "")
+                light = r.get("light", "")
             else:
-                # tuple/list fallback: (ts, dev_id, temp, hum)
+                # tuple/list fallback: (ts, dev_id, temp, hum, [light])
                 ts, dev_id, temp, hum = r[0], r[1], r[2], r[3]
+                light = r[4] if len(r) > 4 else ""
 
             temp_str = f"{temp:.1f}" if isinstance(temp, (int, float)) else (str(temp) if temp is not None else "")
             hum_str = f"{hum:.1f}" if isinstance(hum, (int, float)) else (str(hum) if hum is not None else "")
-            file_handle.write(f"{ts},{dev_id},{temp_str},{hum_str}\n")
+            light_str = f"{light:.1f}" if isinstance(light, (int, float)) else (str(light) if light is not None else "")
+            file_handle.write(f"{ts},{dev_id},{temp_str},{hum_str},{light_str}\n")
         file_handle.flush()
 
     def flush_buffers(self, buffers, date_str):

@@ -22,11 +22,11 @@ The system SHALL support a discrete logger session controlled by the user. A ses
 - **THEN** the system SHALL not read sensors for logging purposes, not buffer readings, and not write to the SD card
 
 ### Requirement: In-memory ring buffer
-While a session is active, the system SHALL buffer one reading per source board per sample interval. The buffer SHALL hold at most 13 readings per board (one hour's worth plus initial sample at 5-minute intervals). When the buffer is full for a given board, the oldest unwritten entry SHALL be discarded to make room for new readings. The total count of all buffered readings across all boards SHALL be tracked in `AppState.log_buffered_count`.
+While a session is active, the system SHALL buffer one reading per source board per sample interval, containing timestamp, device ID, temperature, humidity, and ambient light percentage (if provided by the node). The buffer SHALL hold at most 13 readings per board (one hour's worth plus initial sample at 5-minute intervals). When the buffer is full for a given board, the oldest unwritten entry SHALL be discarded to make room for new readings. The total count of all buffered readings across all boards SHALL be tracked in `AppState.log_buffered_count`.
 
 #### Scenario: Buffer accumulates readings
 - **WHEN** a logging session begins or `SENSOR_LOG_INTERVAL_S` elapses while active
-- **THEN** one reading per active board SHALL be appended to that board's buffer and `AppState.log_buffered_count` SHALL increment accordingly
+- **THEN** one reading per active board (including temperature, humidity, and light percentage if available) SHALL be appended to that board's buffer and `AppState.log_buffered_count` SHALL increment accordingly
 
 #### Scenario: Buffer overflow discards oldest entry
 - **WHEN** a board's buffer already holds 13 entries and a new reading arrives before a flush
@@ -44,7 +44,7 @@ The system SHALL write sensor readings to a unified daily CSV file at `/sensor-d
 
 #### Scenario: New file created for a new day or missing file
 - **WHEN** the system flushes data and no CSV file exists for the current UTC date
-- **THEN** the system SHALL create the file, write the header `timestamp,device_id,temperature_c,humidity_pct`, and then append the buffered, strictly sorted rows
+- **THEN** the system SHALL create the file, write the header `timestamp,device_id,temperature_c,humidity_pct,light_pct`, and then append the buffered, strictly sorted rows
 
 #### Scenario: Existing daily file resumed
 - **WHEN** the system flushes data and a CSV file for the current UTC date already exists
