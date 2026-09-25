@@ -65,6 +65,13 @@ def init_db(db_path: Optional[Path] = None) -> None:
                 last_cursor TEXT NOT NULL,
                 last_synced_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS sensor_capabilities (
+                device_id TEXT,
+                metric_key TEXT,
+                unit TEXT,
+                PRIMARY KEY (device_id, metric_key)
+            );
             """
         )
 
@@ -255,7 +262,7 @@ def query_readings(
     device_id: Optional[str] = None,
     since: Optional[str] = None,
     until: Optional[str] = None,
-    limit: int = 100,
+    limit: Optional[int] = None,
     db_path: Optional[Path] = None,
 ) -> List[Dict[str, Any]]:
     """Queries sensor readings with optional device_id and timestamp filters."""
@@ -272,8 +279,11 @@ def query_readings(
         query += " AND timestamp <= ?"
         params.append(until)
 
-    query += " ORDER BY timestamp DESC LIMIT ?;"
-    params.append(limit)
+    query += " ORDER BY timestamp DESC"
+    if limit is not None and limit > 0:
+        query += " LIMIT ?"
+        params.append(limit)
+    query += ";"
 
     with get_db(db_path) as conn:
         rows = conn.execute(query, params).fetchall()
@@ -302,3 +312,38 @@ def get_stats(db_path: Optional[Path] = None) -> Dict[str, Any]:
             "total_nodes": total_nodes,
             "sync_states": sync_states,
         }
+
+
+def upsert_sensor_capability(
+    device_id: str,
+    metric_key: str,
+    unit: str,
+    db_path: Optional[Path] = None,
+) -> None:
+    """Inserts or updates a sensor capability record for a board."""
+    with get_db(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO sensor_capabilities (device_id, metric_key, unit)
+            VALUES (?, ?, ?)
+            ON CONFLICT(device_id, metric_key) DO UPDATE SET
+                unit = excluded.unit;
+            """,
+            (device_id, metric_key, unit),
+        )
+
+
+def get_all_capabilities(db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Returns all sensor capabilities across all boards."""
+    with get_db(db_path) as conn:
+        rows = conn.execute(
+            "SELECT device_id, metric_key, unit FROM sensor_capabilities ORDER BY device_id, metric_key;"
+        ).fetchall()
+        return [
+            {
+                "device_id": r["device_id"],
+                "metric_key": r["metric_key"],
+                "unit": r["unit"],
+            }
+            for r in rows
+        ]

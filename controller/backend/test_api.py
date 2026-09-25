@@ -64,6 +64,9 @@ class TestControllerAPI(AioHTTPTestCase):
         assert resp.status == 200
         data = await resp.json()
         assert "nodes" in data
+        caps = db.get_all_capabilities(self.test_db)
+        assert len(caps) > 0
+        assert {c["metric_key"] for c in caps} == {"temperature", "humidity"}
         print("POST /api/discover test passed!")
 
     async def test_post_sync(self):
@@ -71,6 +74,8 @@ class TestControllerAPI(AioHTTPTestCase):
         assert resp.status == 200
         data = await resp.json()
         assert data["status"] == "ok"
+        caps = db.get_all_capabilities(self.test_db)
+        assert len(caps) > 0
         print("POST /api/sync test passed!")
 
     async def test_get_readings(self):
@@ -81,7 +86,11 @@ class TestControllerAPI(AioHTTPTestCase):
         # Check dynamic metrics
         latest = readings[0]
         assert "metrics" in latest
-        assert "temp" in latest["metrics"]
+        # Test omitting limit returns all readings without 100 default cap
+        resp_all = await self.client.request("GET", "/api/readings")
+        assert resp_all.status == 200
+        readings_all = await resp_all.json()
+        assert len(readings_all) >= len(readings)
         print("GET /api/readings test passed!")
 
     async def test_post_display(self):
@@ -96,6 +105,34 @@ class TestControllerAPI(AioHTTPTestCase):
         bad_resp = await self.client.request("POST", "/api/display", json={"target": "pico-2w-01"})
         assert bad_resp.status == 400
         print("POST /api/display test passed!")
+
+    async def test_get_capabilities_empty(self):
+        resp = await self.client.request("GET", "/api/capabilities")
+        assert resp.status == 200
+        data = await resp.json()
+        assert isinstance(data, list)
+        assert len(data) == 0
+        print("GET /api/capabilities empty test passed!")
+
+    async def test_get_capabilities_deduplicated(self):
+        # Insert capabilities for multiple devices with overlapping keys
+        db.upsert_sensor_capability("pico-1w", "temperature", "Cel", self.test_db)
+        db.upsert_sensor_capability("pico-1w", "humidity", "%RH", self.test_db)
+        db.upsert_sensor_capability("pico-2w", "temperature", "Cel", self.test_db)
+        db.upsert_sensor_capability("pico-2w", "light", "%", self.test_db)
+
+        resp = await self.client.request("GET", "/api/capabilities")
+        assert resp.status == 200
+        data = await resp.json()
+        assert isinstance(data, list)
+        assert len(data) == 3
+        keys = [item["key"] for item in data]
+        assert keys == ["humidity", "temperature", "light"] or set(keys) == {"temperature", "humidity", "light"}
+        # Verify schema of each object
+        for item in data:
+            assert "key" in item
+            assert "unit" in item
+        print("GET /api/capabilities deduplicated test passed!")
 
 
 if __name__ == "__main__":

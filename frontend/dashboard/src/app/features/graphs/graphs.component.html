@@ -29,7 +29,7 @@
       <!-- Metric Selection Pills -->
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-xs font-semibold uppercase tracking-wider text-text-muted mr-2">Metric:</span>
-        @for (m of METRICS; track m.id) {
+        @for (m of metrics(); track m.id) {
           <button
             type="button"
             (click)="selectMetric(m.id)"
@@ -67,17 +67,18 @@
           </select>
         </div>
 
-        <!-- Limit Filter -->
+        <!-- Day-Range Filter -->
         <div class="flex items-center gap-2">
-          <label for="limitSelect" class="text-xs text-text-muted font-medium whitespace-nowrap">Points:</label>
+          <label for="rangeSelect" class="text-xs text-text-muted font-medium whitespace-nowrap">Range:</label>
           <select
-            id="limitSelect"
-            [value]="selectedLimit()"
-            (change)="onLimitChange($event)"
+            id="rangeSelect"
+            [value]="selectedDays() === null ? RANGE_ALL : selectedDays()"
+            (change)="onDaysChange($event)"
             class="bg-rail border border-theme rounded-lg px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent transition-colors"
+            data-testid="range-select"
           >
-            @for (limit of LIMITS; track limit) {
-              <option [value]="limit">{{ limit }}</option>
+            @for (opt of dayRangeOptions; track opt.label) {
+              <option [value]="opt.days === null ? RANGE_ALL : opt.days">{{ opt.label }}</option>
             }
           </select>
         </div>
@@ -85,52 +86,7 @@
     </div>
   </div>
 
-  <!-- Metric Statistics Cards -->
-  <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-    <!-- Latest Card -->
-    <div class="bg-card border border-theme rounded-xl p-4 flex flex-col justify-between">
-      <span class="text-xs font-medium text-text-muted">Latest Value</span>
-      <div class="mt-2 flex items-baseline gap-1.5">
-        <span class="text-2xl font-bold text-text-primary">
-          {{ stats().latest !== null ? (stats().latest | number: '1.1-1') : '—' }}
-        </span>
-        <span class="text-xs text-text-muted font-medium">{{ currentMetricConfig().unit }}</span>
-      </div>
-    </div>
 
-    <!-- Average Card -->
-    <div class="bg-card border border-theme rounded-xl p-4 flex flex-col justify-between">
-      <span class="text-xs font-medium text-text-muted">Average</span>
-      <div class="mt-2 flex items-baseline gap-1.5">
-        <span class="text-2xl font-bold text-accent">
-          {{ stats().avg !== null ? (stats().avg | number: '1.1-1') : '—' }}
-        </span>
-        <span class="text-xs text-text-muted font-medium">{{ currentMetricConfig().unit }}</span>
-      </div>
-    </div>
-
-    <!-- Min Card -->
-    <div class="bg-card border border-theme rounded-xl p-4 flex flex-col justify-between">
-      <span class="text-xs font-medium text-text-muted">Minimum</span>
-      <div class="mt-2 flex items-baseline gap-1.5">
-        <span class="text-2xl font-bold text-metric-humidity">
-          {{ stats().min !== null ? (stats().min | number: '1.1-1') : '—' }}
-        </span>
-        <span class="text-xs text-text-muted font-medium">{{ currentMetricConfig().unit }}</span>
-      </div>
-    </div>
-
-    <!-- Max Card -->
-    <div class="bg-card border border-theme rounded-xl p-4 flex flex-col justify-between">
-      <span class="text-xs font-medium text-text-muted">Maximum</span>
-      <div class="mt-2 flex items-baseline gap-1.5">
-        <span class="text-2xl font-bold text-metric-light">
-          {{ stats().max !== null ? (stats().max | number: '1.1-1') : '—' }}
-        </span>
-        <span class="text-xs text-text-muted font-medium">{{ currentMetricConfig().unit }}</span>
-      </div>
-    </div>
-  </div>
 
   <!-- Chart Panel -->
   <div class="bg-card border border-theme rounded-xl p-6 shadow-xl relative min-h-[440px]">
@@ -167,6 +123,7 @@
           [yaxis]="chartOptions().yaxis"
           [tooltip]="chartOptions().tooltip"
           [grid]="chartOptions().grid"
+          [legend]="chartOptions().legend"
         ></apx-chart>
       </div>
     } @else {
@@ -181,4 +138,52 @@
       </div>
     }
   </div>
+
+  <!-- Statistics Table -->
+  @if (perBoardStats().length > 0) {
+    <div class="bg-card border border-theme rounded-xl p-5 shadow-xl space-y-3" data-testid="per-board-stats-table">
+      <div class="flex items-center justify-between pb-3 border-b border-divider">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[18px] text-accent">analytics</span>
+          <h3 class="text-sm font-semibold text-text-primary">Statistics</h3>
+        </div>
+        <span class="text-xs text-text-muted font-mono">{{ perBoardStats().length }} {{ perBoardStats().length === 1 ? 'board' : 'boards' }}</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="text-text-muted uppercase tracking-wider text-[11px] border-b border-divider">
+              <th class="py-2.5 px-3 font-semibold">Board</th>
+              <th class="py-2.5 px-3 font-semibold">Min</th>
+              <th class="py-2.5 px-3 font-semibold">Max</th>
+              <th class="py-2.5 px-3 font-semibold">Avg</th>
+              <th class="py-2.5 px-3 font-semibold">Latest</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-divider font-mono">
+            @for (board of perBoardStats(); track board.device_id) {
+              <tr class="hover:bg-white/[0.02] transition-colors" [attr.data-testid]="'board-stat-row-' + board.device_id">
+                <td class="py-3 px-3 font-medium text-text-primary flex items-center gap-2 font-mono">
+                  <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" [style.backgroundColor]="board.color"></span>
+                  <span>{{ board.device_id }}</span>
+                </td>
+                <td class="py-3 px-3 text-metric-humidity">
+                  {{ board.min !== null ? (board.min | number: '1.1-1') : '—' }} {{ currentMetricConfig().unit }}
+                </td>
+                <td class="py-3 px-3 text-metric-light">
+                  {{ board.max !== null ? (board.max | number: '1.1-1') : '—' }} {{ currentMetricConfig().unit }}
+                </td>
+                <td class="py-3 px-3 text-accent">
+                  {{ board.avg !== null ? (board.avg | number: '1.1-1') : '—' }} {{ currentMetricConfig().unit }}
+                </td>
+                <td class="py-3 px-3 text-text-primary font-bold">
+                  {{ board.latest !== null ? (board.latest | number: '1.1-1') : '—' }} {{ currentMetricConfig().unit }}
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
 </div>

@@ -1,17 +1,4 @@
-# Frontend Dashboard Specification
-
-## Purpose
-
-Provides a framework-agnostic user interface to visualize IoT mesh data, monitor node status, and perform basic operations like messaging capable nodes.
-
-## Requirements
-
-### Requirement: Global Layout Navigation
-The dashboard MUST provide a consistent global layout with a fixed icon rail for navigating between primary views (Home, Nodes, Graphs) and a main content area.
-
-#### Scenario: Navigate to Nodes view
-- **WHEN** the user selects the "Nodes" icon from the rail
-- **THEN** the main content area updates to display the Nodes data grid
+## MODIFIED Requirements
 
 ### Requirement: Home Dashboard Summary
 The Home view MUST present summary metrics including online node count, total records, sync status, and sync interval, along with a top-level multi-series chart of recent sensor activity. The chart MUST provide two independent selectors: a metric selector (dynamically populated from the capabilities API) and a count selector (10 | 50 | 100 | 200 | All). Changing one selector MUST NOT reset the other. Each discovered board MUST be rendered as a separate series with a distinct color and a legend displayed at the bottom of the chart.
@@ -32,15 +19,12 @@ The Home view MUST present summary metrics including online node count, total re
 - **WHEN** readings from more than one board are present
 - **THEN** each board MUST appear as an independent, distinctly colored series with a bottom legend identifying each board by its device ID
 
-### Requirement: Nodes Data Grid
-The Nodes view MUST provide a sortable and filterable data grid listing all discovered nodes, displaying their IDs, types, capabilities, IP addresses and a derived online/offline status.
-
-#### Scenario: Node goes offline
-- **WHEN** a node's `last_seen` timestamp exceeds the defined threshold
-- **THEN** its status in the grid is visually represented as "Offline"
-
 ### Requirement: Interactive Time-Series Graphs
 The Graphs view MUST provide interactive time-series charts allowing the user to select specific nodes, metrics, and a time range. Metrics MUST be populated dynamically from the capabilities API. A day-range selector (Last 1d | 3d | 7d | 14d | 30d | All) MUST replace the previous count-based limit selector and constrain the chart to readings within the selected window; All means no time constraint. When All Nodes is selected, each board MUST be rendered as a separate series with a distinct color. A statistics table (Board | Min | Max | Avg | Latest) MUST appear beneath the chart whenever one or more boards contribute data, replacing the previous card-based widgets. A legend MUST be displayed at the bottom of the chart.
+
+#### Scenario: View temperature history for a specific node
+- **WHEN** the user selects a node and a metric in the Graphs view
+- **THEN** the chart visualizes that metric's readings over the selected time range as a single series
 
 #### Scenario: View metric history for a specific node
 - **WHEN** the user selects a single node and a metric in the Graphs view
@@ -61,13 +45,6 @@ The Graphs view MUST provide interactive time-series charts allowing the user to
 #### Scenario: Statistics table visible beneath chart
 - **WHEN** one or more boards contribute readings to the current chart view
 - **THEN** a table is displayed beneath the chart with one row per board showing Min, Max, Avg, and Latest values for the selected metric, replacing the card-based widgets
-
-### Requirement: Send Node Messages
-The dashboard MUST provide an action dialog allowing the user to send plain text messages to display-capable nodes.
-
-#### Scenario: Send display message
-- **WHEN** the user opens the message dialog for an online display node, enters text, and submits
-- **THEN** the system triggers the backend display API to proxy the message to the target node
 
 ### Requirement: Reactive API Communication
 The frontend MUST communicate with backend endpoints using reactive resource/query primitives, providing reactive state (`value`, `isLoading`, `error`, `reload`) for read queries while supporting action dispatching for mutations. The frontend MUST also fetch `GET /api/capabilities` once on application startup and cache the result for the lifetime of the session to drive metric selectors.

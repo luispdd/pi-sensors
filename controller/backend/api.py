@@ -63,10 +63,15 @@ class ControllerAPI:
         since = query.get("since")
         until = query.get("until")
 
-        try:
-            limit = min(int(query.get("limit", 100)), 1000)
-        except ValueError:
-            limit = 100
+        limit_param = query.get("limit")
+        limit = None
+        if limit_param is not None:
+            try:
+                parsed_limit = int(limit_param)
+                if parsed_limit > 0:
+                    limit = parsed_limit
+            except ValueError:
+                pass
 
         readings = db.query_readings(
             device_id=device_id,
@@ -76,6 +81,21 @@ class ControllerAPI:
             db_path=self.poller.db_path,
         )
         return web.json_response(readings)
+
+    async def handle_get_capabilities(self, request: web.Request) -> web.Response:
+        """GET /api/capabilities - returns deduplicated chartable sensor capabilities."""
+        all_caps = db.get_all_capabilities(self.poller.db_path)
+        seen_keys = set()
+        deduped = []
+        for cap in all_caps:
+            metric_key = cap.get("metric_key")
+            if metric_key and metric_key not in seen_keys:
+                seen_keys.add(metric_key)
+                deduped.append({
+                    "key": metric_key,
+                    "unit": cap.get("unit", ""),
+                })
+        return web.json_response(deduped)
 
     async def handle_post_display(self, request: web.Request) -> web.Response:
         """POST /api/display - proxies plain text display message to a board."""
@@ -149,6 +169,7 @@ def create_app(
     app.router.add_post("/api/discover", api_handler.handle_discover)
     app.router.add_post("/api/sync", api_handler.handle_sync)
     app.router.add_get("/api/readings", api_handler.handle_get_readings)
+    app.router.add_get("/api/capabilities", api_handler.handle_get_capabilities)
     app.router.add_post("/api/display", api_handler.handle_post_display)
 
     return app

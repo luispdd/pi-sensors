@@ -4,7 +4,7 @@ import { provideHttpClientTesting, HttpTestingController } from '@angular/common
 import { signal } from '@angular/core';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiService, API_BASE_URL } from './api.service';
-import { Node, SystemStatus, Reading, ReadingsQueryParams } from '../models/api.models';
+import { Node, SystemStatus, Reading, ReadingsQueryParams, SensorCapability } from '../models/api.models';
 
 describe('ApiService with @Service and httpResource', () => {
   let service: ApiService;
@@ -29,6 +29,28 @@ describe('ApiService with @Service and httpResource', () => {
 
   it('should be created and auto-provided via @Service', () => {
     expect(service).toBeTruthy();
+  });
+
+  describe('getCapabilities', () => {
+    it('should create an HttpResourceRef and resolve capabilities', async () => {
+      const mockCapabilities: SensorCapability[] = [
+        { key: 'temperature', unit: 'Cel' },
+        { key: 'humidity', unit: '%RH' },
+      ];
+
+      const capsResource = TestBed.runInInjectionContext(() => service.getCapabilities());
+      expect(capsResource.value()).toEqual([]);
+      TestBed.flushEffects();
+
+      const req = httpMock.expectOne('/api/capabilities');
+      expect(req.request.method).toBe('GET');
+      req.flush(mockCapabilities);
+
+      await vi.waitFor(() => {
+        expect(capsResource.value()).toEqual(mockCapabilities);
+        expect(capsResource.isLoading()).toBe(false);
+      });
+    });
   });
 
   describe('getNodes', () => {

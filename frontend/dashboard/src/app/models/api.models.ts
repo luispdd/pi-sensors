@@ -19,6 +19,11 @@ export const METRIC_TEMP = 'temp';
 export const METRIC_HUMIDITY = 'humidity';
 export const METRIC_LIGHT = 'light_pct';
 
+export interface SensorCapability {
+  key: string;
+  unit: string;
+}
+
 export interface Node {
   device_id: string;
   ip_address: string;

@@ -73,6 +73,32 @@ def test_database():
         assert stats["total_nodes"] == 1
         assert len(stats["sync_states"]) == 1
 
+        # 8. Test Sensor Capabilities
+        # Table exists check
+        with db.get_db(test_db_path) as conn:
+            table_row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='sensor_capabilities';"
+            ).fetchone()
+            assert table_row is not None, "sensor_capabilities table was not created"
+
+        # Initial insert
+        db.upsert_sensor_capability("pico-2w-01", "temperature", "Cel", test_db_path)
+        db.upsert_sensor_capability("pico-2w-01", "humidity", "%RH", test_db_path)
+        db.upsert_sensor_capability("pico-1w-01", "temperature", "Cel", test_db_path)
+
+        caps = db.get_all_capabilities(test_db_path)
+        assert len(caps) == 3
+        assert {"device_id": "pico-2w-01", "metric_key": "temperature", "unit": "Cel"} in caps
+        assert {"device_id": "pico-2w-01", "metric_key": "humidity", "unit": "%RH"} in caps
+        assert {"device_id": "pico-1w-01", "metric_key": "temperature", "unit": "Cel"} in caps
+
+        # Conflict update (change unit on same device_id and metric_key)
+        db.upsert_sensor_capability("pico-2w-01", "temperature", "C", test_db_path)
+        caps_updated = db.get_all_capabilities(test_db_path)
+        assert len(caps_updated) == 3
+        temp_cap = next(c for c in caps_updated if c["device_id"] == "pico-2w-01" and c["metric_key"] == "temperature")
+        assert temp_cap["unit"] == "C"
+
         print("All database tests passed successfully!")
 
 

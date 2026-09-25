@@ -2,11 +2,14 @@
 
 import asyncio
 import json
+import logging
 import socket
 import struct
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend import config
+
+logger = logging.getLogger(__name__)
 
 # CoAP Message Types
 TYPE_CON = 0
@@ -454,6 +457,12 @@ class CoapClient:
 
         payload_str = resp.payload.decode("utf-8")
         if not payload_str.strip():
+            if size > 1:
+                smaller_size = max(1, size // 2)
+                logger.warning(
+                    f"[coap] Empty payload from {ip} for GET /log (size={size}). Retrying with size={smaller_size}..."
+                )
+                return await self.get_log(ip=ip, cursor=cursor, size=smaller_size, port=port)
             raise ValueError(f"Empty payload received from {ip} for GET /log (possible packet size overflow)")
         data = json.loads(payload_str)
         if not isinstance(data, dict) or "data" not in data or "next_cursor" not in data:

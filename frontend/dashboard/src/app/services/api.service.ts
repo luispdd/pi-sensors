@@ -6,6 +6,7 @@ import {
   SystemStatus,
   Reading,
   ReadingsQueryParams,
+  SensorCapability,
   DisplayMessageResponse,
   DiscoverResponse,
   SyncResponse,
@@ -30,6 +31,17 @@ export class ApiService {
    */
   getNodes(): HttpResourceRef<Node[]> {
     const res = httpResource<Node[]>(() => `${this.baseUrl}/nodes`, {
+      defaultValue: [],
+    });
+    this.registeredResources.add(res);
+    return res;
+  }
+
+  /**
+   * Creates a reactive HttpResourceRef for GET /api/capabilities
+   */
+  getCapabilities(): HttpResourceRef<SensorCapability[]> {
+    const res = httpResource<SensorCapability[]>(() => `${this.baseUrl}/capabilities`, {
       defaultValue: [],
     });
     this.registeredResources.add(res);

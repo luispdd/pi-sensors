@@ -23,6 +23,6 @@ COAP_BROADCAST_ADDR = "255.255.255.255"
 
 # Poller Cadence & Synchronization
 POLL_INTERVAL_S = int(os.getenv("CONTROLLER_POLL_INTERVAL_S", "300"))
-LOG_PAGE_SIZE = int(os.getenv("CONTROLLER_LOG_PAGE_SIZE", "10"))
+LOG_PAGE_SIZE = int(os.getenv("CONTROLLER_LOG_PAGE_SIZE", "5"))
 COAP_TIMEOUT_S = float(os.getenv("CONTROLLER_COAP_TIMEOUT_S", "2.0"))
 COAP_MAX_RETRIES = int(os.getenv("CONTROLLER_COAP_MAX_RETRIES", "2"))

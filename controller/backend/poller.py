@@ -31,6 +31,55 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+async def probe_and_store_capabilities(
+    node: Dict[str, Any],
+    db_path: Optional[Path] = None,
+    coap_client: Optional[CoapClient] = None,
+) -> List[Dict[str, Any]]:
+    """Probes /sensors on the node and records advertised capabilities in SQLite."""
+    ip = node.get("ip_address")
+    device_id = node.get("device_id")
+    if not ip or not device_id:
+        return []
+
+    client = coap_client or CoapClient()
+    try:
+        sensors = await client.get_sensors(ip)
+    except Exception as e:
+        logger.warning(f"[poller] Failed probing /sensors for {device_id} ({ip}): {e}")
+        return []
+
+    stored: List[Dict[str, Any]] = []
+    if isinstance(sensors, list):
+        for entry in sensors:
+            if isinstance(entry, dict) and ("n" in entry or "name" in entry):
+                metric_key = str(entry.get("n") or entry.get("name"))
+                unit = str(entry.get("u") or entry.get("unit") or "")
+                db.upsert_sensor_capability(
+                    device_id=device_id,
+                    metric_key=metric_key,
+                    unit=unit,
+                    db_path=db_path,
+                )
+                stored.append({
+                    "device_id": device_id,
+                    "metric_key": metric_key,
+                    "unit": unit,
+                })
+    return stored
+
+
+def node_exposes_sensors(node: Dict[str, Any]) -> bool:
+    """Returns True if node advertises sensor capabilities or /sensors endpoint."""
+    caps = node.get("capabilities")
+    if caps is None:
+        return True
+    return any(
+        c in caps
+        for c in ["sensors", "sensor-collection", "temperature", "humidity", "light"]
+    ) or any("sensor" in str(c).lower() for c in caps)
+
+
 class PollerService:
     """Manages IoTMesh node discovery, catch-up log synchronization, and cadence."""
 
@@ -70,6 +119,17 @@ class PollerService:
                 capabilities=node["capabilities"],
                 db_path=self.db_path,
             )
+            if node_exposes_sensors(node):
+                try:
+                    await probe_and_store_capabilities(
+                        node=node,
+                        db_path=self.db_path,
+                        coap_client=self.coap_client,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[poller] Failed probing capabilities for {node.get('device_id')}: {e}"
+                    )
         return discovered
 
     async def sync_logger(self, node: Dict[str, Any], max_pages: int = 100) -> Dict[str, Any]:
@@ -129,6 +189,19 @@ class PollerService:
             cursor = next_cursor
             await asyncio.sleep(0)  # Yield to event loop between pages
 
+        # Probe and update capabilities after successful sync burst
+        if node_exposes_sensors(node):
+            try:
+                await probe_and_store_capabilities(
+                    node=node,
+                    db_path=self.db_path,
+                    coap_client=self.coap_client,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[poller] Failed updating capabilities during sync for {logger_id}: {e}"
+                )
+
         return {
             "logger_id": logger_id,
             "ip_address": logger_ip,
@@ -183,7 +256,13 @@ class PollerService:
             if not loggers:
                 sync_status = STATUS_OFFLINE
             elif all(r.get("status") == STATUS_ERROR for r in logger_results):
-                sync_status = STATUS_OFFLINE
+                all_unreachable = all(
+                    "timeout" in str(r.get("error", "")).lower()
+                    or "connection" in str(r.get("error", "")).lower()
+                    or "offline" in str(r.get("error", "")).lower()
+                    for r in logger_results
+                )
+                sync_status = STATUS_OFFLINE if all_unreachable else STATUS_ERROR
             elif any(r.get("status") == STATUS_ERROR for r in logger_results):
                 sync_status = STATUS_PARTIAL
             else:

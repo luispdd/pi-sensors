@@ -1,0 +1,66 @@
+## MODIFIED Requirements
+
+### Requirement: HTTP Management and Proxy API
+The system SHALL expose an HTTP REST API on port 8000 allowing operators and automated tools to control the controller and retrieve data using standard HTTP clients like `curl`.
+
+#### Scenario: Trigger on-demand sync via HTTP
+- **WHEN** an HTTP `POST` is received at `/api/sync`
+- **THEN** the system SHALL execute the sync operation and return HTTP 200 with the count of newly ingested records and sync status
+
+#### Scenario: List discovered nodes
+- **WHEN** an HTTP `GET` is received at `/api/nodes`
+- **THEN** the system SHALL return HTTP 200 with a JSON array of all discovered nodes, their IP addresses, and advertised capabilities
+
+#### Scenario: Force immediate network discovery scan
+- **WHEN** an HTTP `POST` is received at `/api/discover`
+- **THEN** the system SHALL execute a fresh CoAP discovery burst and return HTTP 200 with the discovered node list
+
+#### Scenario: Query dynamic historical readings
+- **WHEN** an HTTP `GET` is received at `/api/readings` with optional `device_id`, `since`, and `limit` query parameters
+- **THEN** the system SHALL query SQLite and return HTTP 200 with a JSON array of matching timestamped readings containing their dynamic metrics. If `limit` is omitted, the system SHALL return all matching records without an arbitrary default limit. When `limit` is provided, it SHALL be applied without an arbitrary upper bound clamp.
+
+#### Scenario: Proxy message alert to node display
+- **WHEN** an HTTP `POST` is received at `/api/display` with a JSON payload specifying target node (`target`) and message text (`message`)
+- **THEN** the system SHALL resolve the target node's IP and forward a CoAP `POST /display` request with the plain text message, returning HTTP 200 on success
+
+#### Scenario: Controller health and status query
+- **WHEN** an HTTP `GET` is received at `/api/status`
+- **THEN** the system SHALL return HTTP 200 with a JSON object detailing controller uptime, poller status, logger cursors, and total ingested record counts
+
+#### Scenario: Query aggregated sensor capabilities
+- **WHEN** an HTTP `GET` is received at `/api/capabilities`
+- **THEN** the system SHALL return HTTP 200 with a JSON array of deduplicated chartable metric objects (`key`, `unit`) sourced from the `sensor_capabilities` registry
+
+### Requirement: Cursor-Based Log Synchronization
+The system SHALL synchronize historical sensor logs from nodes advertising data sync capabilities (`rt="data-sync"`) using cursor-based pagination over CoAP `GET /log?cursor=<c>&size=<s>`. Synchronization SHALL perform a catch-up burst of sequential paginated requests until the end of available logs is reached.
+
+#### Scenario: Initial sync from oldest log entry
+- **WHEN** synchronization begins for a logger node with no recorded sync cursor
+- **THEN** the system SHALL request `GET /log?size=50` without a cursor, ingest the returned records, update the recorded cursor to `next_cursor`, and continue requesting subsequent pages until `data` is empty or `next_cursor` matches the requested cursor
+
+#### Scenario: Resuming sync from existing cursor
+- **WHEN** synchronization triggers for a logger node with an existing recorded cursor
+- **THEN** the system SHALL send `GET /log?cursor=<last_cursor>&size=50` and advance sequentially until caught up with the newest record
+
+#### Scenario: Adaptive pagination prevents UDP packet overflow
+- **WHEN** fetching log pages over CoAP (`GET /log`) from constrained nodes
+- **THEN** the system SHALL use a default page size of 5 records to fit safely within 1024-byte UDP datagram buffers, and upon receiving an empty payload (`b''`) with a `2.05 Content` response code, SHALL automatically retry with half the page size (`size = max(1, size // 2)`) to avoid synchronization deadlocks
+
+### Requirement: Decoupled Sync Execution and Background Cadence
+The system SHALL provide a decoupled synchronization operation that is executable on demand and periodically driven by an automated background loop. An asynchronous lock SHALL ensure that on-demand sync requests and automated cadence executions do not run concurrently.
+
+#### Scenario: On-demand sync execution
+- **WHEN** an on-demand sync is requested while no sync is currently running
+- **THEN** the system SHALL acquire the sync lock, run the catch-up synchronization loop across all discovered loggers, update cursors and records, and return the sync summary
+
+#### Scenario: Concurrent sync request rejected or queued safely
+- **WHEN** an on-demand sync is requested while an automated or prior sync is actively executing
+- **THEN** the system SHALL safely handle the collision without corrupting the sync cursor or issuing overlapping requests to the logger
+
+#### Scenario: Background cadence loop
+- **WHEN** the controller service is running
+- **THEN** the system SHALL automatically execute the synchronization routine every 300 seconds
+
+#### Scenario: Sync status error and reachability reporting
+- **WHEN** a background cadence or on-demand sync execution completes across discovered loggers
+- **THEN** if all loggers fail, the system SHALL mark the overall sync status as `offline` only when nodes are unreachable (connection timeout or failure), and as `error` when communication was established but log retrieval or parsing failed
