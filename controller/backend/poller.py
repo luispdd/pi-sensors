@@ -11,6 +11,21 @@ from backend.coap_client import CoapClient
 
 logger = logging.getLogger("controller.poller")
 
+# Poller & sync execution status constants
+STATUS_OK = "ok"
+STATUS_OFFLINE = "offline"
+STATUS_PARTIAL = "partial"
+STATUS_ERROR = "error"
+STATUS_BUSY = "busy"
+
+# Trigger source constants
+TRIGGER_MANUAL = "manual"
+TRIGGER_CADENCE = "cadence"
+
+# Node capability constants
+CAPABILITY_DATA_SYNC = "data-sync"
+CAPABILITY_DATA_LOGGER = "data-logger"
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -35,6 +50,15 @@ class PollerService:
 
         self.last_sync_time: Optional[str] = None
         self.last_sync_result: Optional[Dict[str, Any]] = None
+
+        # Seed last_sync_time from database if records exist
+        try:
+            sync_states = db.get_all_sync_states(self.db_path)
+            valid_times = [s["last_synced_at"] for s in sync_states if s.get("last_synced_at")]
+            if valid_times:
+                self.last_sync_time = max(valid_times)
+        except Exception:
+            pass
 
     async def discover_and_register(self) -> List[Dict[str, Any]]:
         """Scans LAN for IoTMesh nodes and updates local SQLite registry."""
@@ -67,12 +91,13 @@ class PollerService:
                     cursor=cursor,
                     size=config.LOG_PAGE_SIZE,
                 )
+                db.update_node_last_seen(logger_id, db_path=self.db_path)
             except Exception as e:
                 logger.error(f"[poller] Failed fetching log from {logger_id} ({logger_ip}): {e}")
                 return {
                     "logger_id": logger_id,
                     "ip_address": logger_ip,
-                    "status": "error",
+                    "status": STATUS_ERROR,
                     "error": str(e),
                     "ingested": total_ingested,
                     "cursor": cursor,
@@ -107,13 +132,13 @@ class PollerService:
         return {
             "logger_id": logger_id,
             "ip_address": logger_ip,
-            "status": "ok",
+            "status": STATUS_OK,
             "ingested": total_ingested,
             "pages": pages_fetched,
             "cursor": cursor,
         }
 
-    async def sync_now(self, trigger_source: str = "manual") -> Dict[str, Any]:
+    async def sync_now(self, trigger_source: str = TRIGGER_MANUAL) -> Dict[str, Any]:
         """Executes a synchronization catch-up burst across all known loggers.
 
         Guarded by an asyncio.Lock so multiple callers (automated cadence and manual
@@ -121,7 +146,7 @@ class PollerService:
         """
         if self._lock.locked():
             return {
-                "status": "busy",
+                "status": STATUS_BUSY,
                 "message": "Synchronization is already actively executing",
                 "trigger": trigger_source,
                 "timestamp": _utc_now_iso(),
@@ -135,7 +160,7 @@ class PollerService:
             loggers = [
                 n
                 for n in all_nodes
-                if "data-sync" in n["capabilities"] or "data-logger" in n["capabilities"]
+                if CAPABILITY_DATA_SYNC in n["capabilities"] or CAPABILITY_DATA_LOGGER in n["capabilities"]
             ]
 
             # If no loggers are known, perform discovery first
@@ -144,7 +169,7 @@ class PollerService:
                 loggers = [
                     n
                     for n in discovered
-                    if "data-sync" in n["capabilities"] or "data-logger" in n["capabilities"]
+                    if CAPABILITY_DATA_SYNC in n["capabilities"] or CAPABILITY_DATA_LOGGER in n["capabilities"]
                 ]
 
             logger_results = []
@@ -155,25 +180,43 @@ class PollerService:
                 logger_results.append(res)
                 total_ingested += res.get("ingested", 0)
 
+            if not loggers:
+                sync_status = STATUS_OFFLINE
+            elif all(r.get("status") == STATUS_ERROR for r in logger_results):
+                sync_status = STATUS_OFFLINE
+            elif any(r.get("status") == STATUS_ERROR for r in logger_results):
+                sync_status = STATUS_PARTIAL
+            else:
+                sync_status = STATUS_OK
+
+            completed_at = _utc_now_iso()
             summary = {
-                "status": "ok",
+                "status": sync_status,
                 "trigger": trigger_source,
                 "started_at": start_time,
-                "completed_at": _utc_now_iso(),
+                "completed_at": completed_at,
                 "total_ingested": total_ingested,
                 "loggers": logger_results,
             }
 
-            self.last_sync_time = summary["completed_at"]
+            # Only advance last_sync_time if at least one logger was successfully synced
+            if any(r.get("status") == STATUS_OK for r in logger_results):
+                self.last_sync_time = completed_at
+
             self.last_sync_result = summary
             return summary
 
     async def _loop(self) -> None:
-        """Internal background loop running sync_now on poll_interval cadence."""
+        """Internal background loop running discovery and sync_now on poll_interval cadence."""
         logger.info(f"[poller] Background cadence loop started (interval={self.poll_interval}s)")
         while self._running:
             try:
-                await self.sync_now(trigger_source="cadence")
+                await self.discover_and_register()
+            except Exception as e:
+                logger.error(f"[poller] Error in periodic discovery: {e}")
+
+            try:
+                await self.sync_now(trigger_source=TRIGGER_CADENCE)
             except Exception as e:
                 logger.error(f"[poller] Error in periodic sync: {e}")
 

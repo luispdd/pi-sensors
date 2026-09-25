@@ -5,8 +5,18 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import unittest
 from backend import db
-from backend.poller import PollerService
+from backend.poller import (
+    PollerService,
+    STATUS_OK,
+    STATUS_OFFLINE,
+    STATUS_PARTIAL,
+    STATUS_ERROR,
+    STATUS_BUSY,
+    TRIGGER_MANUAL,
+    TRIGGER_CADENCE,
+)
 
 
 class MockCoapClientForPoller:
@@ -72,8 +82,8 @@ async def test_poller_sync():
         assert discovered[0]["device_id"] == "pico-2w-01"
 
         # 2. Test Catch-up sync
-        res = await poller.sync_now(trigger_source="manual")
-        assert res["status"] == "ok"
+        res = await poller.sync_now(trigger_source=TRIGGER_MANUAL)
+        assert res["status"] == STATUS_OK
         assert res["total_ingested"] == 3
         assert len(res["loggers"]) == 1
         assert res["loggers"][0]["cursor"] == "2026-09-23:3"
@@ -85,14 +95,14 @@ async def test_poller_sync():
         assert sync_state["last_cursor"] == "2026-09-23:3"
 
         # 3. Test Repeated sync (already at EOF)
-        res_repeat = await poller.sync_now(trigger_source="manual")
-        assert res_repeat["status"] == "ok"
+        res_repeat = await poller.sync_now(trigger_source=TRIGGER_MANUAL)
+        assert res_repeat["status"] == STATUS_OK
         assert res_repeat["total_ingested"] == 0
 
         # 4. Test Concurrency Rejection
         async with poller._lock:
             busy_res = await poller.sync_now(trigger_source="concurrent_test")
-            assert busy_res["status"] == "busy"
+            assert busy_res["status"] == STATUS_BUSY
 
         # 5. Test Background loop start/stop
         poller.start()
@@ -102,8 +112,37 @@ async def test_poller_sync():
         await asyncio.sleep(0.05)
         assert poller._running is False
 
+        # 6. Test sync failure when logger is offline / errors
+        class FailingCoapClient(MockCoapClientForPoller):
+            async def get_log(self, *args, **kwargs):
+                raise ConnectionError("Timeout reaching node")
+
+        failing_poller = PollerService(db_path=test_db, coap_client=FailingCoapClient())
+        prev_sync_time = failing_poller.last_sync_time
+        fail_res = await failing_poller.sync_now(trigger_source=TRIGGER_MANUAL)
+        assert fail_res["status"] == STATUS_OFFLINE
+        assert fail_res["loggers"][0]["status"] == STATUS_ERROR
+        # Ensure last_sync_time was not updated to failure time
+        assert failing_poller.last_sync_time == prev_sync_time
+
+        # 7. Test sync when no loggers are known or discovered
+        empty_db = Path(tmpdir) / "empty.db"
+        db.init_db(empty_db)
+        class EmptyCoapClient(MockCoapClientForPoller):
+            async def discover_nodes(self):
+                return []
+        empty_poller = PollerService(db_path=empty_db, coap_client=EmptyCoapClient())
+        idle_res = await empty_poller.sync_now(trigger_source=TRIGGER_MANUAL)
+        assert idle_res["status"] == STATUS_OFFLINE
+        assert empty_poller.last_sync_time is None
+
         print("All poller tests passed successfully!")
 
 
+class TestPollerService(unittest.IsolatedAsyncioTestCase):
+    async def test_poller_sync(self):
+        await test_poller_sync()
+
+
 if __name__ == "__main__":
-    asyncio.run(test_poller_sync())
+    unittest.main()

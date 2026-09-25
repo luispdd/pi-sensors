@@ -453,6 +453,8 @@ class CoapClient:
             raise RuntimeError(f"Unexpected CoAP response code {resp.code} for GET /log")
 
         payload_str = resp.payload.decode("utf-8")
+        if not payload_str.strip():
+            raise ValueError(f"Empty payload received from {ip} for GET /log (possible packet size overflow)")
         data = json.loads(payload_str)
         if not isinstance(data, dict) or "data" not in data or "next_cursor" not in data:
             raise ValueError(f"Malformed /log response JSON: {payload_str}")

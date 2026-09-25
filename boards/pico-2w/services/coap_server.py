@@ -517,6 +517,7 @@ class CoapServer:
             size = int(params["size"])
             if size <= 0:
                 raise ValueError("size must be positive")
+            size = min(size, 10)
         except ValueError:
             self._send_bad_request(packet, sender_ip, sender_port, "Invalid size parameter")
             return

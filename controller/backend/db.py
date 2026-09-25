@@ -178,7 +178,27 @@ def insert_readings(
             if cur.rowcount > 0:
                 inserted_count += cur.rowcount
 
+        # Keep last_seen fresh for any registered nodes that delivered readings
+        if inserted_count > 0:
+            device_ids = {r[1] for r in rows_to_insert if r[1]}
+            for dev in device_ids:
+                conn.execute(
+                    "UPDATE nodes SET last_seen = ? WHERE device_id = ?;",
+                    (now, dev),
+                )
+
     return inserted_count
+
+
+def update_node_last_seen(device_id: str, db_path: Optional[Path] = None) -> bool:
+    """Updates the last_seen timestamp for an existing registered node to current UTC time."""
+    now = _utc_now_iso()
+    with get_db(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE nodes SET last_seen = ? WHERE device_id = ?;",
+            (now, device_id),
+        )
+        return cur.rowcount > 0
 
 
 def update_sync_state(

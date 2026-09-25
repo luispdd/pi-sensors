@@ -1,0 +1,35 @@
+<div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+  <div>
+    <h1 class="text-2xl font-bold text-text-primary tracking-tight" data-testid="page-title">{{ title() }}</h1>
+    @if (subtitle()) {
+      <p class="text-sm text-text-muted mt-1" data-testid="page-subtitle">
+        {{ subtitle() }}
+      </p>
+    }
+  </div>
+
+  <!-- Actions & Uptime -->
+  <div class="flex flex-wrap items-center gap-3">
+    <!-- Live Poller Uptime Badge -->
+    <div
+      class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card border border-theme text-xs text-text-muted"
+      data-testid="uptime-badge"
+    >
+      <span class="w-2 h-2 rounded-full bg-accent animate-pulse"></span>
+      <span>Uptime: <strong class="text-text-primary font-mono">{{ uptimeFormatted() }}</strong></span>
+    </div>
+
+    <!-- Refresh Button -->
+    <button
+      type="button"
+      (click)="refresh()"
+      class="inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-accent/15 border border-accent/30 text-accent hover:bg-accent/25 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+      [disabled]="isRefreshing()"
+      data-testid="refresh-btn"
+      title="Refresh Data"
+    >
+      <span class="material-symbols-outlined text-[18px]" [class.animate-spin]="isRefreshing()">refresh</span>
+      <span>{{ isRefreshing() ? 'Refreshing...' : 'Refresh' }}</span>
+    </button>
+  </div>
+</div>

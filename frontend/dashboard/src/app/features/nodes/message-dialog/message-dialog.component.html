@@ -1,0 +1,111 @@
+<div class="dialog-container bg-card text-text-primary p-6 rounded-xl border border-theme max-w-md w-full shadow-2xl space-y-5">
+  <!-- Header -->
+  <div class="flex items-start justify-between">
+    <div>
+      <h2 class="text-lg font-semibold text-text-primary tracking-tight">Send Message to Node</h2>
+      <p class="text-xs text-text-muted mt-0.5">
+        Proxy plain text to target node's display screen
+      </p>
+    </div>
+    <button
+      type="button"
+      (click)="close()"
+      class="text-text-muted hover:text-text-primary transition-colors p-1 rounded-lg hover:bg-white/5"
+      aria-label="Close dialog"
+    >
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+
+  <!-- Target Node Info -->
+  <div class="bg-rail border border-divider rounded-lg p-3 flex items-center justify-between">
+    <div>
+      <span class="text-[10px] uppercase font-semibold text-text-muted tracking-wider block">Target Node</span>
+      <span class="font-mono text-sm text-accent font-medium">{{ data.node.device_id }}</span>
+    </div>
+    <div class="text-right">
+      <span class="text-[10px] uppercase font-semibold text-text-muted tracking-wider block">IP Address</span>
+      <span class="font-mono text-xs text-text-primary">{{ data.node.ip_address }}</span>
+    </div>
+  </div>
+
+  <!-- Message Form -->
+  <div class="space-y-2">
+    <div class="flex items-center justify-between">
+      <label for="messageInput" class="text-xs font-medium text-text-primary">Message Content</label>
+      <span
+        class="text-[11px] font-mono"
+        [ngClass]="{
+          'text-danger-fg': !isLengthValid(),
+          'text-text-muted': isLengthValid()
+        }"
+      >
+        {{ messageText().length }} / {{ MAX_MESSAGE_LENGTH }}
+      </span>
+    </div>
+
+    <textarea
+      id="messageInput"
+      [value]="messageText()"
+      (input)="onMessageInput($event)"
+      rows="3"
+      placeholder="Type message to display on node..."
+      class="w-full bg-rail border border-theme rounded-lg p-3 text-sm text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:border-accent transition-colors resize-none"
+      [disabled]="isSubmitting() || status() === DIALOG_STATUS_SUCCESS"
+    ></textarea>
+
+    @if (!isLengthValid()) {
+      <p class="text-xs text-danger-fg">
+        Message exceeds maximum allowed length of {{ MAX_MESSAGE_LENGTH }} characters.
+      </p>
+    }
+  </div>
+
+  <!-- Status Alert Messages -->
+  @if (status() === DIALOG_STATUS_SUCCESS) {
+    <div class="p-3 rounded-lg bg-success-bg border border-success-fg/30 flex items-center gap-2 text-xs text-success-fg">
+      <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+      </svg>
+      <span>{{ statusMessage() }}</span>
+    </div>
+  }
+
+  @if (status() === DIALOG_STATUS_ERROR) {
+    <div class="p-3 rounded-lg bg-danger-bg border border-danger-fg/30 flex items-center gap-2 text-xs text-danger-fg">
+      <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <span>{{ statusMessage() }}</span>
+    </div>
+  }
+
+  <!-- Dialog Actions -->
+  <div class="flex items-center justify-end gap-3 pt-2">
+    <button
+      type="button"
+      (click)="close()"
+      [disabled]="isSubmitting()"
+      class="px-4 py-2 rounded-lg text-xs font-medium text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors focus:outline-none"
+    >
+      Cancel
+    </button>
+    <button
+      type="button"
+      (click)="send()"
+      [disabled]="!isValid() || isSubmitting() || status() === DIALOG_STATUS_SUCCESS"
+      class="px-4 py-2 rounded-lg text-xs font-medium bg-accent hover:bg-accent-hover text-page font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all inline-flex items-center gap-2 focus:outline-none"
+    >
+      @if (isSubmitting()) {
+        <svg class="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        <span>Sending...</span>
+      } @else {
+        <span>Send Message</span>
+      }
+    </button>
+  </div>
+</div>
