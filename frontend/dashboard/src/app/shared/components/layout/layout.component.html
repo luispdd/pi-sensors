@@ -1,0 +1,61 @@
+<div class="min-h-screen flex bg-page text-text-primary">
+  <!-- Fixed 56px Icon Rail -->
+  <aside
+    class="fixed top-0 left-0 h-screen w-14 bg-rail border-r border-theme flex flex-col items-center justify-between py-3 z-40 select-none shadow-sm"
+    data-testid="icon-rail"
+  >
+    <!-- Top Section: Brand Icon & Navigation -->
+    <div class="flex flex-col items-center gap-4 w-full">
+      <!-- Logo / Brand Symbol -->
+      <a
+        routerLink="/"
+        class="w-10 h-10 rounded-xl bg-accent/10 border border-accent/25 text-accent flex items-center justify-center hover:bg-accent/20 transition-all cursor-pointer shadow-[0_0_10px_rgba(45,212,191,0.15)]"
+        title="IoTMesh Dashboard"
+        data-testid="brand-logo"
+      >
+        <span class="material-symbols-outlined text-[20px]">hub</span>
+      </a>
+
+      <div class="w-8 h-px bg-divider my-0.5"></div>
+
+      <!-- Nav Items List -->
+      <nav class="flex flex-col items-center gap-2 w-full px-2" aria-label="Main Navigation">
+        @for (item of navItems; track item.path) {
+          <a
+            [routerLink]="item.path"
+            [routerLinkActive]="'bg-accent/15 text-accent border-accent/40 shadow-[0_0_12px_rgba(45,212,191,0.2)]'"
+            [routerLinkActiveOptions]="{ exact: item.exact }"
+            class="w-10 h-10 rounded-xl flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-white/5 border border-transparent transition-all group relative cursor-pointer"
+            [title]="item.label"
+            [attr.aria-label]="item.label"
+            [attr.data-testid]="'nav-' + item.label.toLowerCase()"
+          >
+            <span class="material-symbols-outlined text-[20px]">{{ item.icon }}</span>
+
+            <!-- Floating Tooltip -->
+            <span
+              class="absolute left-13 ml-1 px-2.5 py-1 rounded-md bg-card text-text-primary text-xs whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity border border-theme shadow-xl z-50 font-normal"
+            >
+              {{ item.label }}
+            </span>
+          </a>
+        }
+      </nav>
+    </div>
+
+    <!-- Bottom Section: Pulse / Status Dot -->
+    <div class="flex flex-col items-center gap-3">
+      <div
+        class="w-7 h-7 rounded-lg bg-card border border-theme flex items-center justify-center"
+        title="System Active"
+      >
+        <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[0_0_8px_var(--accent)]"></span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content Area with Router Outlet -->
+  <main class="ml-14 flex-1 min-h-screen overflow-x-hidden bg-page" data-testid="main-content">
+    <router-outlet></router-outlet>
+  </main>
+</div>

@@ -96,14 +96,20 @@ class MockCoapServer:
                     resp.code = CODE_CONTENT
                     resp.payload = b'</sensors>;rt="sensors",</log>;rt="data-sync";ep="mock-board-01"'
                 elif path == "log":
+                    queries = [v.decode("utf-8") for num, v in req.options if num == OPT_URI_QUERY]
+                    query_str = "&".join(queries)
                     resp.code = CODE_CONTENT
-                    resp_json = {
-                        "data": [
-                            {"ts": "2026-09-23T12:00:00", "device_id": "mock-board-01", "temp": 21.5, "hum": 45.0}
-                        ],
-                        "next_cursor": "2026-09-23:1",
-                    }
-                    resp.payload = json.dumps(resp_json).encode("utf-8")
+                    if "size=4" in query_str:
+                        # Simulate packet size overflow on large size
+                        resp.payload = b""
+                    else:
+                        resp_json = {
+                            "data": [
+                                {"ts": "2026-09-23T12:00:00", "device_id": "mock-board-01", "temp": 21.5, "hum": 45.0}
+                            ],
+                            "next_cursor": "2026-09-23:1",
+                        }
+                        resp.payload = json.dumps(resp_json).encode("utf-8")
                 elif path == "display":
                     resp.code = CODE_CHANGED
                     resp.payload = b""
@@ -138,6 +144,12 @@ async def test_client_requests():
         assert log_res["next_cursor"] == "2026-09-23:1"
         assert log_res["data"][0]["temp"] == 21.5
         print("CoAP GET /log test passed!")
+
+        # 1b. Test GET /log adaptive retry on empty payload (packet size overflow)
+        log_retry_res = await client.get_log("127.0.0.1", cursor=None, size=4, port=test_port)
+        assert len(log_retry_res["data"]) == 1
+        assert log_retry_res["next_cursor"] == "2026-09-23:1"
+        print("CoAP GET /log adaptive retry test passed!")
 
         # 2. Test POST /display
         disp_res = await client.post_display("127.0.0.1", "Hello Pico!", port=test_port)

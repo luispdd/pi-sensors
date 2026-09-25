@@ -1,0 +1,212 @@
+<div class="max-w-7xl mx-auto space-y-6">
+  <!-- Top Toolbar -->
+  <app-top-toolbar
+    title="System Overview"
+    subtitle="IoTMesh Controller monitoring and sensor telemetry summary"
+  />
+
+  @if (hasError()) {
+    <div class="p-4 rounded-xl bg-danger-bg border border-danger-fg/30 flex items-center justify-between gap-4 text-xs text-danger-fg">
+      <div class="flex items-center gap-2.5">
+        <span class="material-symbols-outlined text-[20px] flex-shrink-0">error</span>
+        <span>{{ errorMessage() }}</span>
+      </div>
+      <button
+        type="button"
+        (click)="reloadAll()"
+        class="px-3 py-1.5 rounded-lg bg-danger-fg/20 hover:bg-danger-fg/30 text-white font-medium transition-colors flex-shrink-0"
+      >
+        Retry
+      </button>
+    </div>
+  }
+
+  <!-- Metric Cards Grid -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <!-- Card 1: Online Nodes -->
+    <div class="metric-card flex flex-col justify-between" data-testid="metric-online-nodes">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Online Nodes</span>
+        <div class="w-8 h-8 rounded-lg bg-accent/10 border border-accent/25 text-accent flex items-center justify-center">
+          <span class="material-symbols-outlined text-[18px]">hub</span>
+        </div>
+      </div>
+      <div class="mt-4">
+        <div class="text-2xl font-bold text-text-primary font-mono">
+          {{ onlineNodesCount() }} <span class="text-sm font-normal text-text-muted">/ {{ totalNodesCount() }}</span>
+        </div>
+        <p class="text-xs text-text-muted mt-1">Active within 10 minutes</p>
+      </div>
+    </div>
+
+    <!-- Card 2: Total Records -->
+    <div class="metric-card flex flex-col justify-between" data-testid="metric-total-records">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Total Records</span>
+        <div class="w-8 h-8 rounded-lg bg-white/5 border border-white/10 text-text-primary flex items-center justify-center">
+          <span class="material-symbols-outlined text-[18px]">database</span>
+        </div>
+      </div>
+      <div class="mt-4">
+        <div class="text-2xl font-bold text-text-primary font-mono">
+          {{ totalRecords() | number }}
+        </div>
+        <p class="text-xs text-text-muted mt-1">Telemetry data points in database</p>
+      </div>
+    </div>
+
+    <!-- Card 3: Sync Status -->
+    <div class="metric-card flex flex-col justify-between" data-testid="metric-sync-status">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Sync Status</span>
+        <div
+          class="w-8 h-8 rounded-lg border flex items-center justify-center transition-colors"
+          [ngClass]="{
+            'bg-success-bg border-success-fg/30 text-success-fg': lastSyncStatus() === SYNC_STATUS_OK,
+            'bg-danger-bg border-danger-fg/30 text-danger-fg': lastSyncStatus() === SYNC_STATUS_ERROR || lastSyncStatus() === SYNC_STATUS_OFFLINE,
+            'bg-warning-bg border-warning-fg/30 text-warning-fg': lastSyncStatus() === SYNC_STATUS_PARTIAL,
+            'bg-white/5 border-white/10 text-text-muted': lastSyncStatus() === SYNC_STATUS_IDLE
+          }"
+        >
+          <span class="material-symbols-outlined text-[18px]">sync</span>
+        </div>
+      </div>
+      <div class="mt-4">
+        <div
+          class="text-lg font-bold uppercase font-mono transition-colors"
+          [ngClass]="{
+            'text-success-fg': lastSyncStatus() === SYNC_STATUS_OK,
+            'text-danger-fg': lastSyncStatus() === SYNC_STATUS_ERROR || lastSyncStatus() === SYNC_STATUS_OFFLINE,
+            'text-warning-fg': lastSyncStatus() === SYNC_STATUS_PARTIAL,
+            'text-text-primary': lastSyncStatus() === SYNC_STATUS_IDLE
+          }"
+        >
+          {{ lastSyncStatus() }}
+        </div>
+        <p class="text-xs text-text-muted mt-1 truncate" [title]="lastSyncTime() ?? 'No sync yet'">
+          Last: {{ lastSyncTimeFormatted() }}
+        </p>
+      </div>
+    </div>
+
+    <!-- Card 4: Sync Interval -->
+    <div class="metric-card flex flex-col justify-between" data-testid="metric-sync-interval">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Sync Interval</span>
+        <div class="w-8 h-8 rounded-lg bg-white/5 border border-white/10 text-accent flex items-center justify-center">
+          <span class="material-symbols-outlined text-[18px]">timer</span>
+        </div>
+      </div>
+      <div class="mt-4">
+        <div class="text-2xl font-bold text-text-primary font-mono">
+          {{ syncIntervalFormatted() }}
+        </div>
+        <p class="text-xs text-text-muted mt-1 flex items-center gap-1.5" data-testid="next-sync-countdown">
+          <span>Next refresh in</span>
+          <span class="font-mono text-accent font-medium">{{ nextSyncRemainingFormatted() }}</span>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Primary Activity Chart Card -->
+  <div class="chart-card space-y-4" data-testid="primary-chart-card">
+    <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+      <div>
+        <h2 class="text-base font-semibold text-text-primary">Recent Activity & Telemetry</h2>
+        <p class="text-xs text-text-muted">Sensor readings recorded across the mesh</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-4">
+        <!-- Metric Selector -->
+        <div class="flex flex-wrap items-center gap-1.5" data-testid="metric-selector">
+          <span class="text-xs font-semibold uppercase tracking-wider text-text-muted mr-1">Metric:</span>
+          @for (m of metrics(); track m.id) {
+            <button
+              type="button"
+              (click)="selectMetric(m.id)"
+              class="px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-150 flex items-center gap-1.5 border"
+              [ngClass]="{
+                'bg-accent/15 border-accent text-accent shadow-sm shadow-accent/20': selectedMetric() === m.id,
+                'bg-rail border-theme text-text-muted hover:text-text-primary': selectedMetric() !== m.id
+              }"
+              [attr.data-testid]="'metric-pill-' + m.id"
+            >
+              <span class="w-1.5 h-1.5 rounded-full" [style.backgroundColor]="m.color"></span>
+              <span>{{ m.label }}</span>
+              <span class="text-[10px] opacity-70">({{ m.unit }})</span>
+            </button>
+          }
+        </div>
+
+        <!-- Count Selector -->
+        <div class="flex flex-wrap items-center gap-1.5" data-testid="count-selector">
+          <span class="text-xs font-semibold uppercase tracking-wider text-text-muted mr-1">Points:</span>
+          @for (opt of countOptions; track opt.label) {
+            <button
+              type="button"
+              (click)="selectCount(opt.value)"
+              class="px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-150 border font-mono"
+              [ngClass]="{
+                'bg-accent/15 border-accent text-accent shadow-sm shadow-accent/20': selectedCount() === opt.value,
+                'bg-rail border-theme text-text-muted hover:text-text-primary': selectedCount() !== opt.value
+              }"
+              [attr.data-testid]="'count-pill-' + opt.label"
+            >
+              {{ opt.label }}
+            </button>
+          }
+        </div>
+      </div>
+    </div>
+
+    <div class="min-h-[300px] w-full">
+      @if (chartSeries().length > 0 && chartSeries()[0].data.length > 0) {
+        <apx-chart
+          [series]="chartSeries()"
+          [chart]="chartOptions().chart"
+          [xaxis]="chartOptions().xaxis"
+          [yaxis]="chartOptions().yaxis"
+          [stroke]="chartOptions().stroke"
+          [fill]="chartOptions().fill"
+          [markers]="chartOptions().markers"
+          [colors]="chartOptions().colors"
+          [dataLabels]="chartOptions().dataLabels"
+          [legend]="chartOptions().legend"
+          [tooltip]="chartOptions().tooltip"
+          [grid]="chartOptions().grid"
+        ></apx-chart>
+      } @else {
+        <div class="h-64 flex flex-col items-center justify-center text-text-muted gap-2">
+          <span class="material-symbols-outlined text-4xl text-text-muted/40">show_chart</span>
+          <p class="text-sm">No telemetry records available yet</p>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- Quick Nodes Overview -->
+  <div class="chart-card space-y-3">
+    <div class="flex justify-between items-center">
+      <h2 class="text-base font-semibold text-text-primary">Discovered Nodes Overview</h2>
+      <a routerLink="/nodes" class="text-xs text-accent hover:underline flex items-center gap-1">
+        View all nodes
+        <span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+      </a>
+    </div>
+
+    <div class="divide-y divide-white/5">
+      @for (node of topNodes(); track node.device_id) {
+        <div class="py-2.5 flex items-center justify-between text-sm">
+          <div class="flex items-center gap-3">
+            <span class="material-symbols-outlined text-accent text-[18px]">memory</span>
+            <span class="font-mono font-medium text-text-primary">{{ node.device_id }}</span>
+            <span class="text-xs text-text-muted hidden sm:inline">({{ node.ip_address }})</span>
+          </div>
+          <app-status-pill [status]="isOnline(node) ? STATUS_ONLINE : STATUS_OFFLINE"></app-status-pill>
+        </div>
+      } @empty {
+        <p class="text-sm text-text-muted py-4 text-center">No nodes registered yet</p>
+      }
+    </div>
+  </div>
+</div>

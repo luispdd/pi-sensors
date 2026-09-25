@@ -1,0 +1,73 @@
+// Centralized Angular Material Theme and Color Palette
+@use '@angular/material' as mat;
+
+// SCSS Color Palette
+$color-bg-page: #0B0D12;
+$color-bg-rail: #0E1117;
+$color-bg-card: #131722;
+$color-bg-card-hover: #1A202C;
+$color-border: rgba(255, 255, 255, 0.07);
+$color-divider: rgba(255, 255, 255, 0.06);
+$color-text-primary: #F4F5F7;
+$color-text-muted: #7B8494;
+$color-accent: #2DD4BF;
+$color-accent-hover: #26B8A5;
+
+// Status Palette
+$color-success-fg: #8BC34A;
+$color-success-bg: rgba(99, 153, 34, 0.16);
+$color-danger-fg: #F09595;
+$color-danger-bg: rgba(226, 75, 74, 0.16);
+$color-warning-fg: #FFB74D;
+$color-warning-bg: rgba(245, 158, 11, 0.16);
+
+// Telemetry Metric Colors
+$color-metric-temperature: #2DD4BF;
+$color-metric-humidity: #38BDF8;
+$color-metric-light: #FBBF24;
+
+// CSS Variables definition (Root theme tokens)
+:root {
+  --bg-page: #{$color-bg-page};
+  --bg-rail: #{$color-bg-rail};
+  --bg-card: #{$color-bg-card};
+  --bg-card-hover: #{$color-bg-card-hover};
+  --border: #{$color-border};
+  --divider: #{$color-divider};
+  --text-primary: #{$color-text-primary};
+  --text-muted: #{$color-text-muted};
+  --accent: #{$color-accent};
+  --accent-hover: #{$color-accent-hover};
+
+  --success-fg: #{$color-success-fg};
+  --success-bg: #{$color-success-bg};
+  --danger-fg: #{$color-danger-fg};
+  --danger-bg: #{$color-danger-bg};
+  --warning-fg: #{$color-warning-fg};
+  --warning-bg: #{$color-warning-bg};
+
+  --metric-temperature: #{$color-metric-temperature};
+  --metric-humidity: #{$color-metric-humidity};
+  --metric-light: #{$color-metric-light};
+}
+
+html {
+  height: 100%;
+  color-scheme: dark;
+  @include mat.theme((color: (theme-type: dark,
+        primary: mat.$cyan-palette,
+        tertiary: mat.$azure-palette,
+      ),
+      typography: Roboto,
+      density: 0,
+    ));
+}
+
+body {
+  color-scheme: dark;
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  margin: 0;
+  height: 100%;
+  font-family: Roboto, "Helvetica Neue", sans-serif;
+}

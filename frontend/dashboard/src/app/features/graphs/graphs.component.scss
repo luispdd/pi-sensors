@@ -1,0 +1,45 @@
+:host {
+  display: block;
+  min-height: 100%;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Custom styling for apexcharts toolbar using theme CSS variables */
+::ng-deep .apexcharts-toolbar {
+  z-index: 10 !important;
+  svg {
+    fill: var(--text-muted) !important;
+    &:hover {
+      fill: var(--accent) !important;
+    }
+  }
+}
+
+::ng-deep .apexcharts-tooltip.apexcharts-theme-dark {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
+  border-radius: 0.5rem !important;
+
+  .apexcharts-tooltip-title {
+    background: var(--bg-rail) !important;
+    border-bottom: 1px solid var(--divider) !important;
+    color: var(--text-primary) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+  }
+}

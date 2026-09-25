@@ -28,6 +28,10 @@ The system SHALL synchronize historical sensor logs from nodes advertising data 
 - **WHEN** synchronization triggers for a logger node with an existing recorded cursor
 - **THEN** the system SHALL send `GET /log?cursor=<last_cursor>&size=50` and advance sequentially until caught up with the newest record
 
+#### Scenario: Adaptive pagination prevents UDP packet overflow
+- **WHEN** fetching log pages over CoAP (`GET /log`) from constrained nodes
+- **THEN** the system SHALL use a default page size of 5 records to fit safely within 1024-byte UDP datagram buffers, and upon receiving an empty payload (`b''`) with a `2.05 Content` response code, SHALL automatically retry with half the page size (`size = max(1, size // 2)`) to avoid synchronization deadlocks
+
 ### Requirement: Decoupled Sync Execution and Background Cadence
 The system SHALL provide a decoupled synchronization operation that is executable on demand and periodically driven by an automated background loop. An asynchronous lock SHALL ensure that on-demand sync requests and automated cadence executions do not run concurrently.
 
@@ -42,6 +46,10 @@ The system SHALL provide a decoupled synchronization operation that is executabl
 #### Scenario: Background cadence loop
 - **WHEN** the controller service is running
 - **THEN** the system SHALL automatically execute the synchronization routine every 300 seconds
+
+#### Scenario: Sync status error and reachability reporting
+- **WHEN** a background cadence or on-demand sync execution completes across discovered loggers
+- **THEN** if all loggers fail, the system SHALL mark the overall sync status as `offline` only when nodes are unreachable (connection timeout or failure), and as `error` when communication was established but log retrieval or parsing failed
 
 ### Requirement: Dynamic Telemetry Ingestion into SQLite
 The system SHALL ingest synchronized sensor records into a local SQLite database preserving all reported sensor measurements dynamically in a JSON metrics structure without requiring fixed schema columns. The database SHALL enforce unique records by `(timestamp, device_id)` to ensure idempotency.
@@ -75,7 +83,7 @@ The system SHALL expose an HTTP REST API on port 8000 allowing operators and aut
 
 #### Scenario: Query dynamic historical readings
 - **WHEN** an HTTP `GET` is received at `/api/readings` with optional `device_id`, `since`, and `limit` query parameters
-- **THEN** the system SHALL query SQLite and return HTTP 200 with a JSON array of matching timestamped readings containing their dynamic metrics
+- **THEN** the system SHALL query SQLite and return HTTP 200 with a JSON array of matching timestamped readings containing their dynamic metrics. If `limit` is omitted, the system SHALL return all matching records without an arbitrary default limit. When `limit` is provided, it SHALL be applied without an arbitrary upper bound clamp.
 
 #### Scenario: Proxy message alert to node display
 - **WHEN** an HTTP `POST` is received at `/api/display` with a JSON payload specifying target node (`target`) and message text (`message`)
@@ -84,3 +92,7 @@ The system SHALL expose an HTTP REST API on port 8000 allowing operators and aut
 #### Scenario: Controller health and status query
 - **WHEN** an HTTP `GET` is received at `/api/status`
 - **THEN** the system SHALL return HTTP 200 with a JSON object detailing controller uptime, poller status, logger cursors, and total ingested record counts
+
+#### Scenario: Query aggregated sensor capabilities
+- **WHEN** an HTTP `GET` is received at `/api/capabilities`
+- **THEN** the system SHALL return HTTP 200 with a JSON array of deduplicated chartable metric objects (`key`, `unit`) sourced from the `sensor_capabilities` registry

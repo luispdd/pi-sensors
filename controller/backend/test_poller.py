@@ -5,8 +5,18 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import unittest
 from backend import db
-from backend.poller import PollerService
+from backend.poller import (
+    PollerService,
+    STATUS_OK,
+    STATUS_OFFLINE,
+    STATUS_PARTIAL,
+    STATUS_ERROR,
+    STATUS_BUSY,
+    TRIGGER_MANUAL,
+    TRIGGER_CADENCE,
+)
 
 
 class MockCoapClientForPoller:
@@ -46,6 +56,12 @@ class MockCoapClientForPoller:
             }
         ]
 
+    async def get_sensors(self, ip: str, port: Optional[int] = None) -> List[Dict[str, Any]]:
+        return [
+            {"v": 20.1, "u": "Cel", "n": "temperature"},
+            {"v": 55.0, "u": "%RH", "n": "humidity"},
+        ]
+
     async def get_log(
         self,
         ip: str,
@@ -70,13 +86,18 @@ async def test_poller_sync():
         discovered = await poller.discover_and_register()
         assert len(discovered) == 1
         assert discovered[0]["device_id"] == "pico-2w-01"
+        caps_after_disc = db.get_all_capabilities(test_db)
+        assert len(caps_after_disc) == 2
+        assert {c["metric_key"] for c in caps_after_disc} == {"temperature", "humidity"}
 
         # 2. Test Catch-up sync
-        res = await poller.sync_now(trigger_source="manual")
-        assert res["status"] == "ok"
+        res = await poller.sync_now(trigger_source=TRIGGER_MANUAL)
+        assert res["status"] == STATUS_OK
         assert res["total_ingested"] == 3
         assert len(res["loggers"]) == 1
         assert res["loggers"][0]["cursor"] == "2026-09-23:3"
+        caps_after_sync = db.get_all_capabilities(test_db)
+        assert len(caps_after_sync) == 2
 
         # Verify DB records
         readings = db.query_readings(db_path=test_db)
@@ -85,14 +106,14 @@ async def test_poller_sync():
         assert sync_state["last_cursor"] == "2026-09-23:3"
 
         # 3. Test Repeated sync (already at EOF)
-        res_repeat = await poller.sync_now(trigger_source="manual")
-        assert res_repeat["status"] == "ok"
+        res_repeat = await poller.sync_now(trigger_source=TRIGGER_MANUAL)
+        assert res_repeat["status"] == STATUS_OK
         assert res_repeat["total_ingested"] == 0
 
         # 4. Test Concurrency Rejection
         async with poller._lock:
             busy_res = await poller.sync_now(trigger_source="concurrent_test")
-            assert busy_res["status"] == "busy"
+            assert busy_res["status"] == STATUS_BUSY
 
         # 5. Test Background loop start/stop
         poller.start()
@@ -102,8 +123,54 @@ async def test_poller_sync():
         await asyncio.sleep(0.05)
         assert poller._running is False
 
+        # 6. Test sync failure when logger is offline / errors
+        class FailingCoapClient(MockCoapClientForPoller):
+            async def get_log(self, *args, **kwargs):
+                raise ConnectionError("Timeout reaching node")
+
+        failing_poller = PollerService(db_path=test_db, coap_client=FailingCoapClient())
+        prev_sync_time = failing_poller.last_sync_time
+        fail_res = await failing_poller.sync_now(trigger_source=TRIGGER_MANUAL)
+        assert fail_res["status"] == STATUS_OFFLINE
+        assert fail_res["loggers"][0]["status"] == STATUS_ERROR
+        # Ensure last_sync_time was not updated to failure time
+        assert failing_poller.last_sync_time == prev_sync_time
+
+        # 7. Test sync when no loggers are known or discovered
+        empty_db = Path(tmpdir) / "empty.db"
+        db.init_db(empty_db)
+        class EmptyCoapClient(MockCoapClientForPoller):
+            async def discover_nodes(self):
+                return []
+        empty_poller = PollerService(db_path=empty_db, coap_client=EmptyCoapClient())
+        # 8. Test probe_and_store_capabilities
+        class SensorMockCoapClient(MockCoapClientForPoller):
+            async def get_sensors(self, ip, port=None):
+                return [
+                    {"v": 27.7, "u": "Cel", "n": "temperature"},
+                    {"v": 44.8, "u": "%RH", "n": "humidity"},
+                    {"v": 100.0, "u": "%", "n": "light"},
+                ]
+
+        from backend.poller import probe_and_store_capabilities
+        probe_res = await probe_and_store_capabilities(
+            {"device_id": "pico-2w-01", "ip_address": "192.168.1.150"},
+            db_path=test_db,
+            coap_client=SensorMockCoapClient(),
+        )
+        assert len(probe_res) == 3
+        stored_caps = db.get_all_capabilities(test_db)
+        assert len(stored_caps) == 3
+        keys = {c["metric_key"] for c in stored_caps}
+        assert keys == {"temperature", "humidity", "light"}
+
         print("All poller tests passed successfully!")
 
 
+class TestPollerService(unittest.IsolatedAsyncioTestCase):
+    async def test_poller_sync(self):
+        await test_poller_sync()
+
+
 if __name__ == "__main__":
-    asyncio.run(test_poller_sync())
+    unittest.main()

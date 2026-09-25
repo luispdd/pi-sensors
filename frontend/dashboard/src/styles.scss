@@ -1,0 +1,13 @@
+/* Global styles and Tailwind entry */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+// Custom dialog panel styling to preserve dark theme
+.custom-dialog-panel .mat-mdc-dialog-container .mdc-dialog__surface {
+  background-color: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 0.75rem !important;
+  padding: 0 !important;
+}
