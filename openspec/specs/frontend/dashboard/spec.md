@@ -1,7 +1,10 @@
+# Frontend Dashboard Specification
+
 ## Purpose
+
 Provides a framework-agnostic user interface to visualize IoT mesh data, monitor node status, and perform basic operations like messaging capable nodes.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Global Layout Navigation
 The dashboard MUST provide a consistent global layout with a fixed icon rail for navigating between primary views (Home, Nodes, Graphs) and a main content area.
@@ -39,8 +42,8 @@ The dashboard MUST provide an action dialog allowing the user to send plain text
 - **THEN** the system triggers the backend display API to proxy the message to the target node
 
 ### Requirement: Reactive API Communication
-The frontend MUST communicate with backend endpoints using reactive HTTP resource primitives (`httpResource`), providing signal-driven state (`value`, `isLoading`, `error`, `reload`) for read queries while supporting action dispatching for mutations.
+The frontend MUST communicate with backend endpoints using reactive resource/query primitives, providing reactive state (`value`, `isLoading`, `error`, `reload`) for read queries while supporting action dispatching for mutations.
 
 #### Scenario: Reactive query data binding
 - **WHEN** a view requests data (such as `/api/nodes`, `/api/status`, or `/api/readings`)
-- **THEN** an `HttpResourceRef` is provided exposing reactive signals that automatically re-fetch when query inputs change and track loading and error states
+- **THEN** a reactive resource reference is provided exposing reactive state that automatically re-fetches when query inputs change and tracks loading and error states
