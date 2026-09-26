@@ -1,1 +1,2 @@
-Do not ever stage or commit files on your own.
+-Do not ever stage or commit files on your own.
+-Don't modify the external libraries, like `lib/microcoapy`, etc. in the codebase.

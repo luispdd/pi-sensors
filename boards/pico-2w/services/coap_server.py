@@ -5,6 +5,7 @@ import struct
 import sys
 from settings import config
 from core.state import MODE_SEMI_SLEEP
+from services.ntp_service import get_utc_iso_timestamp
 from services.log_sync import read_log_records
 
 try:
@@ -79,38 +80,69 @@ class CoapServer:
         self.coap = microcoapy.Coap()
         self.coap.debug = False
         self.coap.responseCallback = self._handle_response
+        self._registered_paths = set()
         self._register_callbacks()
 
     def _register_callbacks(self):
-        routes = [
+        base_routes = [
             (".well-known/core", self._handle_well_known_core),
             ("id", self._handle_id),
+            ("info", self._handle_info),
             ("sensors", self._handle_sensors_collection),
-            ("sensors/temperature", self._handle_sensor_temperature),
-            ("sensors/humidity", self._handle_sensor_humidity),
-            ("sensors/light", self._handle_sensor_light),
             ("display", self._handle_display),
             ("logger", self._handle_logger),
             ("log", self._handle_log),
         ]
-        for path, handler in routes:
+        for path, handler in base_routes:
             self.coap.addIncomingRequestCallback(path, handler)
+            self._registered_paths.add(path)
+
+        self.sync_sensor_routes()
+
+    def sync_sensor_routes(self):
+        """Ensures all metrics in AppState have individual CoAP endpoints registered."""
+        # Built-in routes for pico-2w sensors
+        for key in ("temperature", "humidity", "light"):
+            path = f"sensors/{key}"
+            if path not in self._registered_paths:
+                handler = self._make_metric_handler(key)
+                self.coap.addIncomingRequestCallback(path, handler)
+                self._registered_paths.add(path)
+
+        if hasattr(self.app_state, "get_all_metrics"):
+            metrics = self.app_state.get_all_metrics()
+            for key in metrics.keys():
+                path = f"sensors/{key}"
+                if path not in self._registered_paths:
+                    handler = self._make_metric_handler(key)
+                    self.coap.addIncomingRequestCallback(path, handler)
+                    self._registered_paths.add(path)
+
+    def _make_metric_handler(self, metric_key):
+        def _handler(packet, sender_ip, sender_port):
+            self._handle_single_metric(packet, sender_ip, sender_port, metric_key)
+        return _handler
 
     def _record_caller(self, sender_ip):
         """Increments request counter and updates last_caller."""
         self.app_state.record_request(sender_ip)
+
+    def _check_semi_sleep_read(self):
+        if self.app_state.mode == MODE_SEMI_SLEEP:
+            ts = get_utc_iso_timestamp() if self.app_state.ntp_synced else None
+            if hasattr(self.app_state, "read_registered_sensors"):
+                self.app_state.read_registered_sensors(timestamp=ts)
+            elif self.reader is not None:
+                data = self.reader.read_sensors()
+                self.app_state.update_sensors(data)
 
     def _handle_response(self, packet, remote_address):
         """Processes incoming CoAP responses to learn node IDs for known_nodes cache."""
         sender_ip = remote_address[0]
         code_raw = getattr(packet, "code", None)
         code_str = f"{(code_raw >> 5)}.{(code_raw & 0x1F):02d}" if code_raw is not None else "unknown"
-        print(f"[coap-rx] Incoming response from {sender_ip}:{remote_address[1]} (code={code_str}, type={packet.type}, msg_id={packet.messageid})")
 
         if not packet.payload:
-            print(f"[coap-rx] Packet from {sender_ip} has empty payload (code={code_str})")
-            if code_raw is not None and (code_raw >> 5) >= 4:
-                print(f"[coap-rx] ERROR: Received CoAP client/server error response {code_str} from {sender_ip}")
             return
 
         try:
@@ -118,46 +150,33 @@ class CoapServer:
                 payload_str = packet.payload.decode("utf-8")
             else:
                 payload_str = str(packet.payload)
-        except Exception as e:
-            print(f"[coap-rx] Payload decode error from {sender_ip}: {e}")
+        except Exception:
             return
 
         if code_raw is not None and (code_raw >> 5) >= 4:
-            print(f"[coap-rx] ERROR response {code_str} from {sender_ip}: {payload_str}")
             return
 
-        print(f"[coap-rx] Payload from {sender_ip}: {payload_str[:60]}...")
         device_id = extract_device_id_from_json(payload_str)
         if not device_id:
             device_id = extract_device_id_from_link_format(payload_str)
 
         if device_id:
             self.app_state.register_node(sender_ip, device_id)
-            print(f"[coap] Registered node {device_id} -> {sender_ip}")
 
         # Detect sensor resource types in CoRE Link Format for data logger
         if 'rt="temperature"' in payload_str or 'rt="humidity"' in payload_str:
             target_id = device_id if device_id else sender_ip
             self.app_state.log_active_nodes[sender_ip] = target_id
-            print(f"[coap] Discovered sensor node {target_id} at {sender_ip}")
 
     async def fire_sensor_discovery(self, target_port=5683):
-        """Discovers sensor nodes via subnet broadcast (e.g. 192.168.1.255) like the PC tool does.
-
-        Sends broadcast bursts spaced across 500 ms intervals and checks for incoming
-        responses.
-        """
+        """Discovers sensor nodes via subnet broadcast."""
         local_ip = self.app_state.ip_address if self.app_state.ip_address else None
         local_id = getattr(config, "DEVICE_ID", config.DEFAULT_DEVICE_ID)
 
-        print(f"[coap-disc] Discovery started. Local IP: {local_ip}, device: {local_id}")
-
         if not local_ip or "." not in local_ip:
-            print("[coap-disc] ERROR: local IP not available, cannot broadcast")
             return
 
         self.app_state.log_active_nodes[local_ip] = local_id
-        print(f"[coap-disc] Registered local node {local_id} at {local_ip}")
 
         targets = []
         bcast = get_subnet_broadcast()
@@ -170,8 +189,6 @@ class CoapServer:
             targets.append(bcast)
         if "255.255.255.255" not in targets:
             targets.append("255.255.255.255")
-
-        print(f"[coap-disc] Broadcasting discovery to targets: {targets}")
 
         try:
             try:
@@ -189,33 +206,27 @@ class CoapServer:
             bcast_sock.settimeout(0.5)
 
             for burst in range(1, 4):
-                print(f"[coap-disc] Broadcast burst {burst}/3 → {targets}")
-                # Generate unique message ID per burst to prevent retransmission deduplication
                 msg_id = (0x1234 + burst) & 0xFFFF
                 burst_pkt = bytes([0x50, 0x01, (msg_id >> 8) & 0xFF, msg_id & 0xFF]) + b"\xbb.well-known\x04core"
 
                 for dest in targets:
                     try:
                         bcast_sock.sendto(burst_pkt, (dest, target_port))
-                        print(f"[coap-disc] Dispatched probe to {dest}:{target_port}")
-                    except Exception as e:
-                        print(f"[coap-disc] Broadcast send error to {dest}: {e}")
+                    except Exception:
+                        pass
 
-                # Collect any broadcast responses
                 while True:
                     try:
                         data, addr = bcast_sock.recvfrom(512)
                         sender_ip = addr[0]
                         if sender_ip == local_ip:
                             continue
-                        print(f"[coap-disc] Broadcast response from {sender_ip}: {data[:60]}...")
                         payload_bytes = data.split(b"\xff", 1)[1] if b"\xff" in data else b""
                         payload_str = payload_bytes.decode("utf-8", "ignore")
                         dev_id = extract_device_id_from_link_format(payload_str) or extract_device_id_from_json(payload_str) or sender_ip
                         if 'rt="temperature"' in payload_str or 'rt="humidity"' in payload_str or 'ep=' in payload_str:
                             self.app_state.register_node(sender_ip, dev_id)
                             self.app_state.log_active_nodes[sender_ip] = dev_id
-                            print(f"[coap-disc] Registered discovered node {dev_id} at {sender_ip}")
                     except OSError:
                         break
                 await asyncio.sleep(0.1)
@@ -223,8 +234,6 @@ class CoapServer:
             bcast_sock.close()
         except Exception as e:
             print(f"[coap-disc] Broadcast client error: {e}")
-
-        print(f"[coap-disc] Discovery done. log_active_nodes: {self.app_state.log_active_nodes}")
 
     async def _probe_caller(self, sender_ip, sender_port=5683):
         """Asynchronously probes an unknown sender for its node identification."""
@@ -245,17 +254,30 @@ class CoapServer:
         device_id = getattr(config, "DEVICE_ID", config.DEFAULT_DEVICE_ID)
         device_type = getattr(config, "DEVICE_TYPE", config.DEFAULT_DEVICE_TYPE)
 
-        # CoRE Link Format string per IoTMesh spec v0.1
-        link_format = (
-            f'</id>;rt="core.d";ep="{device_id}";dt="{device_type}",'
-            '</sensors>;rt="sensor-collection";if="sensor",'
-            '</sensors/temperature>;rt="temperature";if="sensor",'
-            '</sensors/humidity>;rt="humidity";if="sensor",'
-            '</sensors/light>;rt="light";if="sensor",'
-            '</display>;rt="display";if="actuator",'
-            '</logger>;rt="data-logger";if="logger",'
-            '</log>;rt="data-sync";if="logger"'
-        )
+        # Dynamic link format advertising registered sensors and logger endpoints
+        parts = [
+            f'</id>;rt="core.d";ep="{device_id}";dt="{device_type}"',
+            '</info>;rt="info";if="sensor"',
+            '</sensors>;rt="sensor-collection";if="sensor"',
+        ]
+
+        if hasattr(self.app_state, "get_all_metrics"):
+            metrics = self.app_state.get_all_metrics()
+            for key in metrics.keys():
+                parts.append(f'</sensors/{key}>;rt="{key}";if="sensor"')
+        else:
+            parts.extend([
+                '</sensors/temperature>;rt="temperature";if="sensor"',
+                '</sensors/humidity>;rt="humidity";if="sensor"',
+                '</sensors/light>;rt="light";if="sensor"',
+            ])
+
+        parts.extend([
+            '</display>;rt="display";if="actuator"',
+            '</logger>;rt="data-logger";if="logger"',
+            '</log>;rt="data-sync";if="logger"',
+        ])
+        link_format = ",".join(parts)
 
         self.coap.sendResponse(
             sender_ip,
@@ -264,6 +286,24 @@ class CoapServer:
             link_format,
             COAP_RESPONSE_CODE.COAP_CONTENT,
             COAP_CONTENT_FORMAT.COAP_APPLICATION_LINK_FORMAT,
+            packet.token, request_packet=packet,
+        )
+
+    def _handle_info(self, packet, sender_ip, sender_port):
+        if packet.method != COAP_METHOD.COAP_GET:
+            self._send_method_not_allowed(packet, sender_ip, sender_port)
+            return
+
+        self._record_caller(sender_ip)
+        self._check_semi_sleep_read()
+        payload = self.app_state.to_dict()
+        self.coap.sendResponse(
+            sender_ip,
+            sender_port,
+            packet.messageid,
+            json.dumps(payload),
+            COAP_RESPONSE_CODE.COAP_CONTENT,
+            COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
             packet.token, request_packet=packet,
         )
 
@@ -310,109 +350,95 @@ class CoapServer:
             packet.token, request_packet=packet,
         )
 
-    def _handle_sensor_temperature(self, packet, sender_ip, sender_port):
-        if packet.method != COAP_METHOD.COAP_GET:
-            self._send_method_not_allowed(packet, sender_ip, sender_port)
-            return
-
-        self._record_caller(sender_ip)
-
-        if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
-            data = self.reader.read_sensors()
-            self.app_state.update_sensors(data)
-
-        senml = {
-            "n": "temperature",
-            "u": "Cel",
-            "v": self.app_state.temperature_c,
-        }
-        self.coap.sendResponse(
-            sender_ip,
-            sender_port,
-            packet.messageid,
-            json.dumps(senml),
-            COAP_RESPONSE_CODE.COAP_CONTENT,
-            COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
-            packet.token, request_packet=packet,
-        )
-
-    def _handle_sensor_humidity(self, packet, sender_ip, sender_port):
-        if packet.method != COAP_METHOD.COAP_GET:
-            self._send_method_not_allowed(packet, sender_ip, sender_port)
-            return
-
-        self._record_caller(sender_ip)
-
-        if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
-            data = self.reader.read_sensors()
-            self.app_state.update_sensors(data)
-
-        senml = {
-            "n": "humidity",
-            "u": "%RH",
-            "v": self.app_state.humidity_pct,
-        }
-        self.coap.sendResponse(
-            sender_ip,
-            sender_port,
-            packet.messageid,
-            json.dumps(senml),
-            COAP_RESPONSE_CODE.COAP_CONTENT,
-            COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
-            packet.token, request_packet=packet,
-        )
-
     def _handle_sensors_collection(self, packet, sender_ip, sender_port):
         if packet.method != COAP_METHOD.COAP_GET:
             self._send_method_not_allowed(packet, sender_ip, sender_port)
             return
 
         self._record_caller(sender_ip)
+        self._check_semi_sleep_read()
 
-        if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
-            data = self.reader.read_sensors()
-            self.app_state.update_sensors(data)
+        if hasattr(self.app_state, "to_senml"):
+            senml_payload = self.app_state.to_senml()
+        else:
+            senml_payload = [
+                {"n": "temperature", "u": "Cel", "v": self.app_state.temperature_c},
+                {"n": "humidity", "u": "%RH", "v": self.app_state.humidity_pct},
+                {"n": "light", "u": "%", "v": self.app_state.light_pct},
+            ]
 
-        pack = [
-            {"n": "temperature", "u": "Cel", "v": self.app_state.temperature_c},
-            {"n": "humidity", "u": "%RH", "v": self.app_state.humidity_pct},
-            {"n": "light", "u": "%", "v": self.app_state.light_pct},
-        ]
         self.coap.sendResponse(
             sender_ip,
             sender_port,
             packet.messageid,
-            json.dumps(pack),
+            json.dumps(senml_payload),
             COAP_RESPONSE_CODE.COAP_CONTENT,
             COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
             packet.token, request_packet=packet,
         )
 
-    def _handle_sensor_light(self, packet, sender_ip, sender_port):
+    def _handle_single_metric(self, packet, sender_ip, sender_port, metric_key):
         if packet.method != COAP_METHOD.COAP_GET:
             self._send_method_not_allowed(packet, sender_ip, sender_port)
             return
 
         self._record_caller(sender_ip)
+        self._check_semi_sleep_read()
 
-        if self.app_state.mode == MODE_SEMI_SLEEP and self.reader is not None:
-            data = self.reader.read_sensors()
-            self.app_state.update_sensors(data)
+        m = self.app_state.get_metric(metric_key) if hasattr(self.app_state, "get_metric") else None
+        if m is not None:
+            senml_item = {
+                "n": metric_key,
+                "u": m.get("unit", ""),
+                "v": m.get("val"),
+            }
+            if m.get("ts"):
+                senml_item["t"] = m["ts"]
+            elif self.app_state.timestamp:
+                senml_item["t"] = self.app_state.timestamp
+            self.coap.sendResponse(
+                sender_ip,
+                sender_port,
+                packet.messageid,
+                json.dumps(senml_item),
+                COAP_RESPONSE_CODE.COAP_CONTENT,
+                COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
+                packet.token, request_packet=packet,
+            )
+        else:
+            # Fallback for standard properties
+            val = getattr(self.app_state, f"{metric_key}_c", getattr(self.app_state, f"{metric_key}_pct", None))
+            if val is not None:
+                unit = "Cel" if metric_key == "temperature" else ("%RH" if metric_key == "humidity" else "%")
+                senml_item = {"n": metric_key, "u": unit, "v": val}
+                self.coap.sendResponse(
+                    sender_ip,
+                    sender_port,
+                    packet.messageid,
+                    json.dumps(senml_item),
+                    COAP_RESPONSE_CODE.COAP_CONTENT,
+                    COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
+                    packet.token, request_packet=packet,
+                )
+            else:
+                self.coap.sendResponse(
+                    sender_ip,
+                    sender_port,
+                    packet.messageid,
+                    "Not Found",
+                    COAP_RESPONSE_CODE.COAP_NOT_FOUND,
+                    COAP_CONTENT_FORMAT.COAP_TEXT_PLAIN,
+                    packet.token, request_packet=packet,
+                )
 
-        senml = {
-            "n": "light",
-            "u": "%",
-            "v": self.app_state.light_pct,
-        }
-        self.coap.sendResponse(
-            sender_ip,
-            sender_port,
-            packet.messageid,
-            json.dumps(senml),
-            COAP_RESPONSE_CODE.COAP_CONTENT,
-            COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
-            packet.token, request_packet=packet,
-        )
+    def _handle_sensor_temperature(self, packet, sender_ip, sender_port):
+        self._handle_single_metric(packet, sender_ip, sender_port, "temperature")
+
+    def _handle_sensor_humidity(self, packet, sender_ip, sender_port):
+        self._handle_single_metric(packet, sender_ip, sender_port, "humidity")
+
+    def _handle_sensor_light(self, packet, sender_ip, sender_port):
+        self._handle_single_metric(packet, sender_ip, sender_port, "light")
 
     def _handle_display(self, packet, sender_ip, sender_port):
         if packet.method != COAP_METHOD.COAP_POST:
@@ -462,7 +488,7 @@ class CoapServer:
             sender_port,
             packet.messageid,
             "Method Not Allowed",
-            COAP_RESPONSE_CODE.COAP_METHOD_NOT_ALLOWD,
+            getattr(COAP_RESPONSE_CODE, "COAP_METHOD_NOT_ALLOWED", getattr(COAP_RESPONSE_CODE, "COAP_METHOD_NOT_ALLOWD", 133)),
             COAP_CONTENT_FORMAT.COAP_TEXT_PLAIN,
             packet.token, request_packet=packet,
         )
@@ -509,7 +535,6 @@ class CoapServer:
         params = self._extract_query_params(packet)
 
         if "size" not in params:
-            print(f"[coap-server] GET /log missing mandatory 'size' param from {sender_ip}")
             self._send_bad_request(packet, sender_ip, sender_port, "Missing size parameter")
             return
 
@@ -524,7 +549,6 @@ class CoapServer:
 
         cursor = params.get("cursor")
 
-        # Read logs from SD card
         if self.sd_storage is not None:
             try:
                 self.sd_storage.mount()
@@ -551,13 +575,11 @@ class CoapServer:
             COAP_CONTENT_FORMAT.COAP_APPLICATION_JSON,
             packet.token, request_packet=packet,
         )
-        print(f"[coap-server] Sent /log response to {sender_ip}:{sender_port} (rows={len(result['data'])}, next_cursor={result['next_cursor']})")
 
     def start(self):
         """Initializes and binds the UDP socket for unicast, broadcast, and CoAP multicast."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        # Configure socket options with robust fallbacks for MicroPython ports
         sol_socket = getattr(socket, "SOL_SOCKET", 1)
         so_reuseaddr = getattr(socket, "SO_REUSEADDR", 2)
         so_broadcast = getattr(socket, "SO_BROADCAST", 0x20)
@@ -569,17 +591,12 @@ class CoapServer:
             except Exception:
                 pass
 
-        broadcast_ok = False
         for lvl in (sol_socket, 1, 0xFFFF):
             try:
                 sock.setsockopt(lvl, so_broadcast, 1)
-                broadcast_ok = True
-                print(f"[coap] SO_BROADCAST enabled (level={lvl}, opt={so_broadcast})")
                 break
             except Exception:
                 pass
-        if not broadcast_ok:
-            print("[coap] Warning: Could not enable SO_BROADCAST via setsockopt")
 
         sock.bind(("0.0.0.0", self.port))
         sock.setblocking(False)
@@ -594,3 +611,20 @@ class CoapServer:
             except Exception as e:
                 print(f"[coap] Loop exception: {e}")
             await asyncio.sleep(0.02)
+
+    def stop(self):
+        self.coap.stop()
+
+
+async def run_coap_task(app_state, coap_server=None, reader=None, sd_storage=None, port=getattr(config, "COAP_PORT", 5683)):
+    """Starts and runs the asynchronous IoTMesh CoAP server once WiFi connects."""
+    try:
+        while getattr(app_state, "wifi_status", None) != "connected":
+            await asyncio.sleep(0.5)
+
+        print(f"[coap] WiFi connected, starting CoAP server on port {port}...")
+        server = coap_server if coap_server is not None else CoapServer(app_state, reader=reader, sd_storage=sd_storage, port=port)
+        server.start()
+        await server.run()
+    except Exception as e:
+        print(f"[coap] Error in coap task: {e}")

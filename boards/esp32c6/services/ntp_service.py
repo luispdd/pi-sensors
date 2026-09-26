@@ -130,4 +130,3 @@ async def run_ntp_task(app_state):
         except Exception as e:
             print(f"[ntp] Error in ntp task: {e}")
             await asyncio.sleep(30.0)
-

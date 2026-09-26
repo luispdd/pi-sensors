@@ -77,9 +77,10 @@ class DataLogger:
 
         # 1. Local board reading
         if local_ip in self.app_state.log_active_nodes or local_id in self.app_state.log_active_nodes.values():
-            temp = self.app_state.temperature_c
-            hum = self.app_state.humidity_pct
-            light = getattr(self.app_state, "light_pct", None)
+            metrics = self.app_state.get_all_metrics() if hasattr(self.app_state, "get_all_metrics") else {}
+            temp = metrics.get("temperature", {}).get("val") if "temperature" in metrics else getattr(self.app_state, "temperature_c", None)
+            hum = metrics.get("humidity", {}).get("val") if "humidity" in metrics else getattr(self.app_state, "humidity_pct", None)
+            light = metrics.get("light", {}).get("val") if "light" in metrics else getattr(self.app_state, "light_pct", None)
             local_ts = getattr(self.app_state, "timestamp", None) or ts
             self.app_state.buffer_reading(local_id, local_ts, temp, hum, light)
 
