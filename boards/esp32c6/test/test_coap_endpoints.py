@@ -8,9 +8,9 @@ from unittest.mock import MagicMock
 
 # Configure import path for boards/esp32c6 and lib
 ESP32C6_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-PICO1W_LIB_DIR = os.path.abspath(os.path.join(ESP32C6_DIR, "..", "pico-1w", "lib"))
-if PICO1W_LIB_DIR not in sys.path:
-    sys.path.insert(0, PICO1W_LIB_DIR)
+ESP32C6_LIB_DIR = os.path.abspath(os.path.join(ESP32C6_DIR, "lib"))
+if ESP32C6_LIB_DIR not in sys.path:
+    sys.path.insert(0, ESP32C6_LIB_DIR)
 if ESP32C6_DIR not in sys.path:
     sys.path.insert(0, ESP32C6_DIR)
 
@@ -197,6 +197,59 @@ class TestEsp32C6CoapEndpoints(unittest.TestCase):
         self.assertEqual(val_map["temperature"], 26.8)
         self.assertEqual(val_map["humidity"], 48.2)
 
+    def test_pir_sensor_coap_endpoints_and_display_exclusion(self):
+        """Verify registered PIR sensor exposes motion in /sensors and /info on ESP32-C6."""
+        from hardware.sensors.pir import PIRSensor
+        from hardware.ui import UIController
+        pir = PIRSensor(pin=4, window_s=10)
+        pir.last_motion = 12.5
+        self.app_state.register_sensor(pir)
+        self.app_state.read_registered_sensors(timestamp="2026-09-26T14:00:00")
+
+        # GET /sensors
+        req = DummyPacket(method=COAP_METHOD.COAP_GET, messageid=109)
+        self.server._handle_sensors_collection(req, "192.168.1.50", 5683)
+        senml = json.loads(self.sent_responses[-1]["payload"])
+        val_map = {item["n"]: item["v"] for item in senml}
+        unit_map = {item["n"]: item["u"] for item in senml}
+        self.assertIn("motion", val_map)
+        self.assertEqual(val_map["motion"], 12.5)
+        self.assertEqual(unit_map["motion"], "%")
+
+        # GET /info
+        req_info = DummyPacket(method=COAP_METHOD.COAP_GET, messageid=110)
+        self.server._handle_info(req_info, "192.168.1.50", 5683)
+        info_data = json.loads(self.sent_responses[-1]["payload"])
+        self.assertEqual(info_data["motion"], 12.5)
+        self.assertEqual(info_data["motion_unit"], "%")
+
+        # Verify display render_sensor_view does not crash and leaves display unaffected
+        ui = UIController(self.app_state)
+        ui.render_sensor_view(self.app_state)
+
+    def test_microcoapy_patch_handles_uri_path_without_unicode_escape(self):
+        """Verify CoAP incoming request dispatches correctly via patched microcoapy without unicode_escape."""
+        class MockOpt:
+            def __init__(self, number, buffer):
+                self.number = number
+                self.buffer = buffer
+
+        req = DummyPacket(method=COAP_METHOD.COAP_GET, messageid=111)
+        req.options = [
+            MockOpt(11, b".well-known"),
+            MockOpt(11, b"core"),
+        ]
+
+        # Call microcoapy's handleIncomingRequest which should use our patch
+        res = self.server.coap.handleIncomingRequest(req, "192.168.1.50", 5683)
+        self.assertTrue(res)
+        self.assertTrue(len(self.sent_responses) > 0)
+        last_resp = self.sent_responses[-1]
+        self.assertEqual(last_resp["code"], COAP_RESPONSE_CODE.COAP_CONTENT)
+        self.assertIn('rt="core.d"', last_resp["payload"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

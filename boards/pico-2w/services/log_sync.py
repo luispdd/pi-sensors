@@ -135,6 +135,13 @@ def read_log_records(dir_path, cursor_str, size):
                                 light = None
                             record["light"] = light
 
+                        if len(parts) >= 6:
+                            try:
+                                motion = float(parts[5].strip()) if parts[5].strip() != "" else None
+                            except ValueError:
+                                motion = None
+                            record["motion"] = motion
+
                         data.append(record)
                     data_line_idx += 1
                     current_line = data_line_idx

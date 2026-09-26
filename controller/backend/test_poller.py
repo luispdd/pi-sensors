@@ -236,6 +236,60 @@ class TestPollerService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(readings[0]["device_id"], "esp32c6")
             self.assertEqual(readings[1]["device_id"], "esp32c6")
 
+    async def test_pir_motion_capability_probe_and_telemetry(self):
+        """Validate dynamic motion capability probe, storage, and telemetry ingestion."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_db = Path(tmpdir) / "test_motion.db"
+            db.init_db(test_db)
+
+            class MockPIRCoapClient:
+                async def discover_nodes(self):
+                    return [
+                        {
+                            "device_id": "pico-2w-pir",
+                            "ip_address": "192.168.1.180",
+                            "capabilities": ["core.d", "sensor-collection", "humidity", "temperature", "light", "motion"],
+                        }
+                    ]
+
+                async def get_sensors(self, ip, port=None):
+                    return [
+                        {"v": 22.4, "u": "Cel", "t": "2026-09-26T18:00:00", "n": "temperature"},
+                        {"v": 54.1, "u": "%", "t": "2026-09-26T18:00:00", "n": "humidity"},
+                        {"v": 62.0, "u": "%", "t": "2026-09-26T18:00:00", "n": "light"},
+                        {"v": 15.0, "u": "%", "t": "2026-09-26T18:00:00", "n": "motion"},
+                    ]
+
+            poller = PollerService(db_path=test_db, coap_client=MockPIRCoapClient())
+
+            # 1. Discover and probe
+            discovered = await poller.discover_and_register()
+            self.assertEqual(len(discovered), 1)
+
+            # 2. Check capabilities in DB
+            caps = db.get_all_capabilities(test_db)
+            cap_map = {c["metric_key"]: c["unit"] for c in caps}
+            self.assertIn("motion", cap_map)
+            self.assertEqual(cap_map["motion"], "%")
+
+            # 3. Telemetry ingestion with motion
+            records = [
+                {
+                    "ts": "2026-09-26T18:00:00",
+                    "device_id": "pico-2w-pir",
+                    "temp": 22.4,
+                    "hum": 54.1,
+                    "light": 62.0,
+                    "motion": 15.0,
+                }
+            ]
+            ingested = db.insert_readings(records, default_device_id="pico-2w-pir", db_path=test_db)
+            self.assertEqual(ingested, 1)
+
+            readings = db.query_readings(device_id="pico-2w-pir", db_path=test_db)
+            self.assertEqual(len(readings), 1)
+            self.assertEqual(readings[0]["metrics"]["motion"], 15.0)
+
 
 if __name__ == "__main__":
     unittest.main()

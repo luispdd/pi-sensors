@@ -179,6 +179,35 @@ class TestPico2wModularMigration(unittest.TestCase):
         self.assertEqual(val_map["temperature"], 23.1)
         self.assertEqual(val_map["light"], 85.0)
 
+    def test_pir_sensor_coap_endpoints_and_display_exclusion(self):
+        """Verify registered PIR sensor exposes motion in /sensors and /info without modifying display."""
+        from hardware.sensors.pir import PIRSensor
+        pir = PIRSensor(pin=12, window_s=10)
+        pir.last_motion = 15.0
+        self.app_state.register_sensor(pir)
+        self.app_state.read_registered_sensors(timestamp="2026-09-26T14:00:00")
+
+        # GET /sensors
+        req = DummyPacket(method=COAP_METHOD.COAP_GET, messageid=306)
+        self.server._handle_sensors_collection(req, "192.168.1.101", 5683)
+        senml = json.loads(self.sent_responses[-1]["payload"])
+        val_map = {item["n"]: item["v"] for item in senml}
+        unit_map = {item["n"]: item["u"] for item in senml}
+        self.assertIn("motion", val_map)
+        self.assertEqual(val_map["motion"], 15.0)
+        self.assertEqual(unit_map["motion"], "%")
+
+        # GET /info
+        req_info = DummyPacket(method=COAP_METHOD.COAP_GET, messageid=307)
+        self.server._handle_info(req_info, "192.168.1.101", 5683)
+        info_data = json.loads(self.sent_responses[-1]["payload"])
+        self.assertEqual(info_data["motion"], 15.0)
+        self.assertEqual(info_data["motion_unit"], "%")
+
+        # Verify display render_sensor_view does not crash and leaves display unaffected
+        ui = UIController(self.app_state)
+        ui.render_sensor_view(self.app_state)
+
 
 if __name__ == "__main__":
     unittest.main()

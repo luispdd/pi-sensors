@@ -164,6 +164,14 @@ class AppState:
     def light_pct(self, val):
         self.update_metric("light", val)
 
+    @property
+    def motion_pct(self):
+        return self.get_metric_val("motion")
+
+    @motion_pct.setter
+    def motion_pct(self, val):
+        self.update_metric("motion", val)
+
     def update_sensors(self, sensor_data):
         """Updates internal telemetry from a legacy sensors dict."""
         if "temperature_c" in sensor_data and sensor_data["temperature_c"] is not None:
@@ -172,6 +180,8 @@ class AppState:
             self.update_metric("humidity", sensor_data["humidity_pct"])
         if "light_pct" in sensor_data and sensor_data["light_pct"] is not None:
             self.update_metric("light", sensor_data["light_pct"])
+        if "motion_pct" in sensor_data and sensor_data["motion_pct"] is not None:
+            self.update_metric("motion", sensor_data["motion_pct"])
         if "read_errors" in sensor_data:
             self.read_errors = sensor_data["read_errors"]
         if "timestamp" in sensor_data and sensor_data["timestamp"] is not None:
@@ -182,7 +192,7 @@ class AppState:
 
     # --- Data Logger Methods ---
 
-    def buffer_reading(self, device_id, ts, temp, hum, light=None):
+    def buffer_reading(self, device_id, ts, temp, hum, light=None, motion=None):
         """Appends reading to log_buffers[device_id] (max 13), and increments log_buffered_count."""
         if device_id not in self.log_buffers:
             self.log_buffers[device_id] = []
@@ -191,7 +201,7 @@ class AppState:
             buf.pop(0)
         else:
             self.log_buffered_count += 1
-        buf.append({"ts": ts, "device_id": device_id, "temp": temp, "hum": hum, "light": light})
+        buf.append({"ts": ts, "device_id": device_id, "temp": temp, "hum": hum, "light": light, "motion": motion})
 
     def retain_unflushed(self, count_flushed_per_device=12):
         """Retains entries beyond the first count_flushed_per_device entries in log_buffers,

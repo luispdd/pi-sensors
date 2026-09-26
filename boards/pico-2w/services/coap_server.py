@@ -22,6 +22,54 @@ import microcoapy
 from microcoapy import COAP_CONTENT_FORMAT, COAP_METHOD, COAP_RESPONSE_CODE
 
 
+def _patch_microcoapy_unicode():
+    """Ensures microcoapy decodes Uri-Path options using standard UTF-8.
+
+    Standard microcoapy uses opt.buffer.decode('unicode_escape'), which raises
+    LookupError on MicroPython builds where non-essential codecs are omitted.
+    RFC 7252 Section 5.10.1 mandates UTF-8 for Uri-Path options.
+    """
+    def _safe_handle_incoming_request(self, requestPacket, sourceIp, sourcePort):
+        url = ""
+        for opt in getattr(requestPacket, "options", []):
+            opt_num = getattr(opt, "number", None)
+            if opt_num == 11 and len(opt.buffer) > 0:  # 11 = COAP_OPTION_NUMBER.COAP_URI_PATH
+                if url != "":
+                    url += "/"
+                try:
+                    url += opt.buffer.decode("utf-8")
+                except Exception:
+                    try:
+                        url += opt.buffer.decode("unicode_escape")
+                    except Exception:
+                        url += str(opt.buffer)
+
+        urlCallback = None
+        if url != "":
+            urlCallback = self.callbacks.get(url)
+
+        if urlCallback is None:
+            if self.responseCallback:
+                return False
+            self.sendResponse(
+                sourceIp,
+                sourcePort,
+                requestPacket.messageid,
+                None,
+                COAP_RESPONSE_CODE.COAP_NOT_FOUND,
+                COAP_CONTENT_FORMAT.COAP_NONE,
+                requestPacket.token,
+            )
+        else:
+            urlCallback(requestPacket, sourceIp, sourcePort)
+        return True
+
+    microcoapy.Coap.handleIncomingRequest = _safe_handle_incoming_request
+
+
+_patch_microcoapy_unicode()
+
+
 def extract_device_id_from_link_format(link_text):
     """Extracts ep=\"<device_id>\" from CoRE Link Format string."""
     for pattern in ('ep="', "ep='"):
@@ -584,21 +632,25 @@ class CoapServer:
         so_reuseaddr = getattr(socket, "SO_REUSEADDR", 2)
         so_broadcast = getattr(socket, "SO_BROADCAST", 0x20)
 
-        for lvl in (sol_socket, 1, 0xFFFF):
+        for lvl in (sol_socket, 4095, 1, 0xFFFF):
             try:
                 sock.setsockopt(lvl, so_reuseaddr, 1)
                 break
             except Exception:
                 pass
 
-        for lvl in (sol_socket, 1, 0xFFFF):
+        for lvl in (sol_socket, 4095, 1, 0xFFFF):
             try:
                 sock.setsockopt(lvl, so_broadcast, 1)
                 break
             except Exception:
                 pass
 
-        sock.bind(("0.0.0.0", self.port))
+        try:
+            sock.bind(("", self.port))
+        except Exception:
+            sock.bind(("0.0.0.0", self.port))
+
         sock.setblocking(False)
         self.coap.setCustomSocket(sock)
         print(f"[coap] Server listening on UDP port {self.port}")

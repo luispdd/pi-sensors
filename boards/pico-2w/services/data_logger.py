@@ -81,8 +81,9 @@ class DataLogger:
             temp = metrics.get("temperature", {}).get("val") if "temperature" in metrics else getattr(self.app_state, "temperature_c", None)
             hum = metrics.get("humidity", {}).get("val") if "humidity" in metrics else getattr(self.app_state, "humidity_pct", None)
             light = metrics.get("light", {}).get("val") if "light" in metrics else getattr(self.app_state, "light_pct", None)
+            motion = metrics.get("motion", {}).get("val") if "motion" in metrics else getattr(self.app_state, "motion_pct", None)
             local_ts = getattr(self.app_state, "timestamp", None) or ts
-            self.app_state.buffer_reading(local_id, local_ts, temp, hum, light)
+            self.app_state.buffer_reading(local_id, local_ts, temp, hum, light, motion)
 
         # 2. Remote boards
         for ip, dev_id in list(self.app_state.log_active_nodes.items()):
@@ -99,8 +100,9 @@ class DataLogger:
                     h = res[1]
                     remote_ts = res[2]
                     l = res[3] if len(res) > 3 else None
+                    m = res[4] if len(res) > 4 else None
                     reading_ts = remote_ts if remote_ts else ts
-                    self.app_state.buffer_reading(dev_id, reading_ts, t, h, l)
+                    self.app_state.buffer_reading(dev_id, reading_ts, t, h, l, m)
             except Exception as e:
                 # Silently skip on error/timeout per requirement
                 pass
@@ -133,14 +135,15 @@ class DataLogger:
                 t = parsed.get("temperature_c") or parsed.get("temperature") or parsed.get("temp")
                 h = parsed.get("humidity_pct") or parsed.get("humidity") or parsed.get("hum")
                 l = parsed.get("light_pct") or parsed.get("light")
+                m = parsed.get("motion_pct") or parsed.get("motion")
                 remote_ts = parsed.get("timestamp") or parsed.get("ts") or parsed.get("time") or parsed.get("t")
-                return (t, h, remote_ts, l)
+                return (t, h, remote_ts, l, m)
         except Exception as e:
             print(f"[logger] HTTP sensor fetch from {ip} failed: {e}")
         return None
 
     async def _fetch_remote_sensor(self, ip, port=5683, timeout_s=2.0):
-        """Fetches /sensors from remote board and returns (temp, hum, ts) or None on timeout/error."""
+        """Fetches /sensors from remote board and returns (temp, hum, ts, light, motion) or None on timeout/error."""
         # Try CoAP GET /sensors using client UDP socket (RFC 7252 NON GET /sensors)
         try:
             try:
@@ -163,7 +166,7 @@ class DataLogger:
             if b"\xff" in data:
                 payload_str = data.split(b"\xff", 1)[1].decode("utf-8", "ignore")
                 data_json = json.loads(payload_str)
-                t, h, remote_ts, l = None, None, None, None
+                t, h, remote_ts, l, m = None, None, None, None, None
                 if isinstance(data_json, list):
                     for item in data_json:
                         if isinstance(item, dict):
@@ -177,15 +180,18 @@ class DataLogger:
                                     remote_ts = item.get("t") or item.get("ts")
                             elif item.get("n") == "light":
                                 l = item.get("v")
+                            elif item.get("n") == "motion":
+                                m = item.get("v")
                             elif item.get("n") in ("time", "timestamp"):
                                 remote_ts = item.get("vs") or item.get("v") or item.get("t")
                 elif isinstance(data_json, dict):
                     t = data_json.get("temperature") or data_json.get("temp")
                     h = data_json.get("humidity") or data_json.get("hum")
                     l = data_json.get("light") or data_json.get("light_pct")
+                    m = data_json.get("motion") or data_json.get("motion_pct")
                     remote_ts = data_json.get("timestamp") or data_json.get("ts") or data_json.get("time") or data_json.get("t")
-                if t is not None or h is not None or l is not None:
-                    return (t, h, remote_ts, l)
+                if t is not None or h is not None or l is not None or m is not None:
+                    return (t, h, remote_ts, l, m)
         except Exception as e:
             print(f"[logger] CoAP sensor fetch from {ip} failed: {e}")
 
@@ -254,6 +260,8 @@ class DataLogger:
                             "device_id": device_id if len(r) < 2 else r[1],
                             "temp": r[2] if len(r) > 2 else None,
                             "hum": r[3] if len(r) > 3 else None,
+                            "light": r[4] if len(r) > 4 else None,
+                            "motion": r[5] if len(r) > 5 else None,
                         })
 
             # Strictly sort by (ts, device_id)

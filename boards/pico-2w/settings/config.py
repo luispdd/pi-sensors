@@ -39,6 +39,7 @@ def has_valid_credentials():
 WIFI_RETRY_INTERVAL_S = 10
 
 # Hardware Pin Mappings (GPIO numbers for Pico 2 W / RP2350)
+PIN_PIR = 12        # GP12 (Pin 16) - AM312 PIR motion sensor (active HIGH)
 PIN_DHT22 = 15      # GP15 (Pin 20) - DHT22 Data line
 PIN_LIGHT_ADC = 26  # GP26 (Pin 31) - ADC0 for ADA2748 ALS-PT19 light sensor
 LIGHT_SCALE_FACTOR = 4.0  # Linear scaling multiplier (8.0x: ~5% raw daylight -> 40%)
@@ -76,6 +77,7 @@ SENSOR_READ_INTERVAL_S = 2.0       # DHT22 requires >= 1-2s between readings
 DISPLAY_REFRESH_INTERVAL_S = 1.0
 SENSOR_LOG_INTERVAL_S = 300        # Periodic logging sample interval (5 minutes)
 LOG_FLUSH_INTERVAL_S = 3600        # SD card auto-flush interval (1 hour)
+PIR_WINDOW_S = 300                 # Motion sensor duty cycle rolling window (5 minutes)
 
 # Data Logger Storage Configuration
 LOG_SD_ROOT = "/sensor-data"

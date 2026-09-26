@@ -89,7 +89,8 @@ class TestLightSensorIntegration(unittest.TestCase):
 
     def test_sd_storage_csv_header_and_writing(self):
         self.assertIn("light_pct", CSV_HEADER)
-        self.assertEqual(CSV_HEADER.strip().split(","), ["timestamp", "device_id", "temperature_c", "humidity_pct", "light_pct"])
+        self.assertIn("motion_pct", CSV_HEADER)
+        self.assertEqual(CSV_HEADER.strip().split(","), ["timestamp", "device_id", "temperature_c", "humidity_pct", "light_pct", "motion_pct"])
 
         storage = SDStorage(spi=None, tft_cs=None, sd_cs_pin=None)
         buf = io.StringIO()
@@ -101,8 +102,8 @@ class TestLightSensorIntegration(unittest.TestCase):
         output = buf.getvalue().splitlines()
 
         self.assertEqual(len(output), 2)
-        self.assertEqual(output[0], "2026-09-22T12:00:00,pico-2w,22.0,55.0,60.5")
-        self.assertEqual(output[1], "2026-09-22T12:05:00,pico-1w,21.0,50.0,")
+        self.assertEqual(output[0], "2026-09-22T12:00:00,pico-2w,22.0,55.0,60.5,")
+        self.assertEqual(output[1], "2026-09-22T12:05:00,pico-1w,21.0,50.0,,")
 
     def test_log_sync_five_column_parsing(self):
         import tempfile

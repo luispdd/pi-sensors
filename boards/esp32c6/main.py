@@ -3,6 +3,7 @@
 from settings import config
 from core.state import AppState
 from hardware.sensors.dht22 import create_sensor as create_dht22
+from hardware.sensors.pir import create_sensor as create_pir
 from hardware.led import get_status_led, run_led_task
 from hardware.ui import UIController
 from services.network_manager import NetworkManager, run_network_task
@@ -37,13 +38,16 @@ async def main():
     ui.show_splash("ESP32-C6 Node", "Initializing...")
 
     # Register modular sensors
+    pir_sensor = create_pir(pin=getattr(config, "PIN_PIR", 4), window_s=getattr(config, "PIR_WINDOW_S", 300))
     app_state.register_sensor(create_dht22(pin=config.PIN_DHT22))
+    app_state.register_sensor(pir_sensor)
 
     net_mgr = NetworkManager()
 
     print("[main] Spawning concurrent service tasks...")
     await asyncio.gather(
         run_sensor_task(app_state),
+        pir_sensor.run_sampling_task(),
         ui.run_display_task(app_state),
         ui.run_button_task(app_state),
         run_led_task(app_state, led),

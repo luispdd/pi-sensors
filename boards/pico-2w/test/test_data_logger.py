@@ -149,6 +149,89 @@ class TestDataLogger(unittest.TestCase):
         self.assertIn(local_id, self.app_state.log_buffers)
         self.assertEqual(self.app_state.log_buffers[local_id][0]["temp"], 24.2)
 
+    def test_motion_buffering_and_sd_flush(self):
+        """Verify buffering with motion metric and flushing to SD storage."""
+        device_id = "pico-pir"
+        self.app_state.buffer_reading(device_id, "2026-09-26T12:00:00", 22.0, 50.0, 75.0, 15.0)
+
+        record = self.app_state.log_buffers[device_id][0]
+        self.assertEqual(record["temp"], 22.0)
+        self.assertEqual(record["hum"], 50.0)
+        self.assertEqual(record["light"], 75.0)
+        self.assertEqual(record["motion"], 15.0)
+
+        self.app_state.logging_active = True
+        asyncio.run(self.data_logger.flush_to_sd(end_session=True))
+
+        self.assertEqual(len(self.sd_storage.flushed_batches), 1)
+        flushed_rows, _ = self.sd_storage.flushed_batches[0]
+        self.assertEqual(flushed_rows[0]["motion"], 15.0)
+
+    def test_sd_storage_six_column_writing_and_sync_parsing(self):
+        """Verify SDStorage writes 6 columns and read_log_records parses 4, 5, and 6 column rows."""
+        import io
+        import tempfile
+        import shutil
+        from hardware.sd_storage import SDStorage, CSV_HEADER
+        from services.log_sync import read_log_records
+
+        self.assertIn("motion_pct", CSV_HEADER)
+        self.assertEqual(CSV_HEADER.strip().split(","), ["timestamp", "device_id", "temperature_c", "humidity_pct", "light_pct", "motion_pct"])
+
+        storage = SDStorage(spi=None, tft_cs=None, sd_cs_pin=None)
+        buf = io.StringIO()
+        rows = [
+            {"ts": "2026-09-26T12:00:00", "device_id": "pico-2w", "temp": 22.0, "hum": 55.0, "light": 60.5, "motion": 15.0},
+            {"ts": "2026-09-26T12:05:00", "device_id": "esp32c6", "temp": 23.0, "hum": 52.0, "light": None, "motion": 8.5},
+            {"ts": "2026-09-26T12:10:00", "device_id": "pico-1w", "temp": 21.0, "hum": 50.0, "light": None, "motion": None},
+        ]
+        storage.write_rows(buf, rows)
+        lines = buf.getvalue().splitlines()
+
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[0], "2026-09-26T12:00:00,pico-2w,22.0,55.0,60.5,15.0")
+        self.assertEqual(lines[1], "2026-09-26T12:05:00,esp32c6,23.0,52.0,,8.5")
+        self.assertEqual(lines[2], "2026-09-26T12:10:00,pico-1w,21.0,50.0,,")
+
+        # Test log_sync parsing
+        temp_dir = tempfile.mkdtemp()
+        try:
+            csv_path = os.path.join(temp_dir, "2026-09-26.csv")
+            with open(csv_path, "w") as f:
+                f.write(CSV_HEADER)
+                f.write("2026-09-26T12:00:00,pico-2w,22.0,55.0,60.5,15.0\n")
+                f.write("2026-09-26T12:05:00,esp32c6,23.0,52.0,,8.5\n")
+                # Legacy 5-column row
+                f.write("2026-09-26T12:10:00,pico-legacy-5,21.0,50.0,40.0\n")
+                # Legacy 4-column row
+                f.write("2026-09-26T12:15:00,pico-legacy-4,20.0,45.0\n")
+
+            res = read_log_records(temp_dir, None, 10)
+            data = res["data"]
+            self.assertEqual(len(data), 4)
+
+            # 6-column full
+            self.assertEqual(data[0]["device_id"], "pico-2w")
+            self.assertEqual(data[0]["light"], 60.5)
+            self.assertEqual(data[0]["motion"], 15.0)
+
+            # 6-column missing light
+            self.assertEqual(data[1]["device_id"], "esp32c6")
+            self.assertIsNone(data[1]["light"])
+            self.assertEqual(data[1]["motion"], 8.5)
+
+            # Legacy 5-column row
+            self.assertEqual(data[2]["device_id"], "pico-legacy-5")
+            self.assertEqual(data[2]["light"], 40.0)
+            self.assertNotIn("motion", data[2])
+
+            # Legacy 4-column row
+            self.assertEqual(data[3]["device_id"], "pico-legacy-4")
+            self.assertNotIn("light", data[3])
+            self.assertNotIn("motion", data[3])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

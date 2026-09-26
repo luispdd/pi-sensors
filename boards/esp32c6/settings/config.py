@@ -42,11 +42,13 @@ WIFI_RETRY_INTERVAL_S = 10
 # Left Pin 5 (GPIO 1) -> SSD1306 Display SCL (400 kHz)
 # Left Pin 6 (GPIO 2) -> DHT22 DATA
 # Left Pin 7 (GPIO 3) -> Button Pin A (active-LOW, PULL_UP)
+# Left Pin 8 (GPIO 4) -> AM312 PIR Motion Sensor (active HIGH)
 # Onboard   (GPIO 8) -> Onboard WS2812 RGB LED (NeoPixel)
 PIN_I2C_SDA = 0         # GPIO 0 - I2C SDA
 PIN_I2C_SCL = 1         # GPIO 1 - I2C SCL
 PIN_DHT22 = 2           # GPIO 2 - DHT22 Data line
 PIN_BUTTON = 3          # GPIO 3 - User/Mode Button (active LOW, internal pull-up)
+PIN_PIR = 4             # GPIO 4 - AM312 PIR Motion Sensor (active HIGH)
 PIN_RGB_LED = 8         # GPIO 8 - Onboard WS2812 RGB LED (NeoPixel)
 
 # I2C & SSD1306 OLED Display Settings
@@ -60,6 +62,7 @@ DISPLAY_HEIGHT = OLED_HEIGHT
 # Timing & Intervals (in seconds)
 SENSOR_READ_INTERVAL_S = 2.5       # DHT22 requires >= 2s between readings
 DISPLAY_REFRESH_INTERVAL_S = 1.0   # UI update interval
+PIR_WINDOW_S = 300                 # Motion sensor duty cycle rolling window (5 minutes)
 
 # HTTP & CoAP Server Configuration
 HTTP_PORT = 80
