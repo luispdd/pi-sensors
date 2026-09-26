@@ -1,5 +1,6 @@
-"""CoAP server implementing IoTMesh Service Spec v0.1 with dynamic sensor dispatch for Raspberry Pi Pico W."""
+"""CoAP server implementing IoTMesh Service Spec v0.1 with dynamic sensor dispatch for ESP32-C6."""
 
+import gc
 import json
 import struct
 import sys
@@ -46,9 +47,8 @@ def extract_device_id_from_json(json_text):
 class CoapServer:
     """CoAP server dynamically serving registered telemetry resources and IoTMesh endpoints."""
 
-    def __init__(self, app_state, reader=None, port=getattr(config, "COAP_PORT", 5683)):
+    def __init__(self, app_state, port=getattr(config, "COAP_PORT", 5683)):
         self.app_state = app_state
-        self.reader = reader
         self.port = port
         self.coap = microcoapy.Coap()
         self.coap.debug = False
@@ -74,14 +74,14 @@ class CoapServer:
 
     def sync_sensor_routes(self):
         """Ensures all metrics in AppState have individual CoAP endpoints registered."""
-        if hasattr(self.app_state, "get_all_metrics"):
-            metrics = self.app_state.get_all_metrics()
-            for key in metrics.keys():
-                path = f"sensors/{key}"
-                if path not in self._registered_paths:
-                    handler = self._make_metric_handler(key)
-                    self.coap.addIncomingRequestCallback(path, handler)
-                    self._registered_paths.add(path)
+        metrics = self.app_state.get_all_metrics()
+        for key in metrics.keys():
+            path = f"sensors/{key}"
+            if path not in self._registered_paths:
+                # Add route with closure capturing metric key
+                handler = self._make_metric_handler(key)
+                self.coap.addIncomingRequestCallback(path, handler)
+                self._registered_paths.add(path)
 
     def _make_metric_handler(self, metric_key):
         def _handler(packet, sender_ip, sender_port):
@@ -111,15 +111,6 @@ class CoapServer:
         if device_id:
             self.app_state.register_node(sender_ip, device_id)
 
-    async def _probe_caller(self, sender_ip, sender_port=5683):
-        """Asynchronously probes an unknown sender for its node identification."""
-        try:
-            target_port = getattr(config, "COAP_PORT", 5683)
-            self.coap.getNonConf(sender_ip, target_port, ".well-known/core")
-            self.coap.getNonConf(sender_ip, target_port, "id")
-        except Exception as e:
-            print(f"[coap] Caller probe exception: {e}")
-
     def _handle_well_known_core(self, packet, sender_ip, sender_port):
         if packet.method != COAP_METHOD.COAP_GET:
             self._send_method_not_allowed(packet, sender_ip, sender_port)
@@ -136,10 +127,9 @@ class CoapServer:
             '</info>;rt="info";if="sensor"',
             '</sensors>;rt="sensor-collection";if="sensor"',
         ]
-        if hasattr(self.app_state, "get_all_metrics"):
-            metrics = self.app_state.get_all_metrics()
-            for key in metrics.keys():
-                parts.append(f'</sensors/{key}>;rt="{key}";if="sensor"')
+        metrics = self.app_state.get_all_metrics()
+        for key in metrics.keys():
+            parts.append(f'</sensors/{key}>;rt="{key}";if="sensor"')
 
         parts.append('</display>;rt="display";if="actuator"')
         link_format = ",".join(parts)
@@ -195,12 +185,7 @@ class CoapServer:
     def _check_semi_sleep_read(self):
         if self.app_state.mode == MODE_SEMI_SLEEP:
             ts = get_utc_iso_timestamp() if self.app_state.ntp_synced else None
-            if hasattr(self.app_state, "read_registered_sensors"):
-                self.app_state.read_registered_sensors(timestamp=ts)
-            elif self.reader is not None:
-                data = self.reader.read_sensors()
-                data["timestamp"] = ts
-                self.app_state.update_sensors(data)
+            self.app_state.read_registered_sensors(timestamp=ts)
 
     def _handle_sensors_collection(self, packet, sender_ip, sender_port):
         if packet.method != COAP_METHOD.COAP_GET:
@@ -229,7 +214,7 @@ class CoapServer:
         self._record_caller(sender_ip)
         self._check_semi_sleep_read()
 
-        m = self.app_state.get_metric(metric_key) if hasattr(self.app_state, "get_metric") else None
+        m = self.app_state.get_metric(metric_key)
         if m is not None:
             senml_item = {
                 "n": metric_key,
@@ -279,7 +264,7 @@ class CoapServer:
                 payload = packet.payload
                 if isinstance(payload, (bytes, bytearray)):
                     payload = payload.decode("utf-8")
-
+                
                 text = ""
                 try:
                     data = json.loads(payload)
@@ -288,22 +273,12 @@ class CoapServer:
                     else:
                         text = str(data)
                 except Exception:
-                    text = str(payload).strip() if payload else ""
-
-                if len(text) > 256:
-                    text = text[:256]
-
-                caller = self.app_state.resolve_caller(sender_ip)
-                if sender_ip not in self.app_state.known_nodes:
-                    try:
-                        asyncio.create_task(self._probe_caller(sender_ip, sender_port))
-                    except Exception as e:
-                        print(f"[coap] Caller probe trigger error: {e}")
+                    text = str(payload).strip()
 
                 if self.app_state.mode == MODE_SEMI_SLEEP:
-                    self.app_state.set_pending_message(text, caller=caller)
+                    self.app_state.set_pending_message(text, caller=sender_ip)
                 else:
-                    self.app_state.enter_message_mode(text, caller=caller)
+                    self.app_state.enter_message_mode(text, caller=sender_ip)
 
                 self.coap.sendResponse(
                     sender_ip,
@@ -375,11 +350,16 @@ class CoapServer:
 
     async def run(self):
         """Asynchronous polling task to handle incoming CoAP packets."""
+        loop_count = 0
         while True:
             try:
                 self.coap.loop(blocking=False)
             except Exception as e:
                 print(f"[coap] Loop exception: {e}")
+            loop_count += 1
+            if loop_count >= 100:  # Periodically collect garbage every ~2 seconds
+                gc.collect()
+                loop_count = 0
             await asyncio.sleep(0.02)
 
     def stop(self):
@@ -398,3 +378,4 @@ async def run_coap_task(app_state, port=getattr(config, "COAP_PORT", 5683)):
         await server.run()
     except Exception as e:
         print(f"[coap] Error in coap task: {e}")
+

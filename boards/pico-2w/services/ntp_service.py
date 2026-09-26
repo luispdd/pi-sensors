@@ -101,3 +101,30 @@ class NTPTracker:
             return True
 
         return False
+
+
+async def run_ntp_task(app_state):
+    """Synchronizes NTP clock on boot once WiFi is connected, and periodically."""
+    try:
+        import uasyncio as asyncio
+    except ImportError:
+        import asyncio
+
+    ntp_tracker = NTPTracker()
+    while True:
+        try:
+            if getattr(app_state, "wifi_status", None) == "connected":
+                if not getattr(app_state, "ntp_synced", False):
+                    success, res = sync_ntp()
+                    if success:
+                        app_state.ntp_synced = True
+                        print(f"[ntp] NTP sync successful: {res}")
+                    else:
+                        print(f"[ntp] NTP sync failed: {res}")
+                else:
+                    ntp_tracker.check_and_resync(app_state)
+            await asyncio.sleep(10.0 if not getattr(app_state, "ntp_synced", False) else 60.0)
+        except Exception as e:
+            print(f"[ntp] Error in ntp task: {e}")
+            await asyncio.sleep(30.0)
+

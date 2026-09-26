@@ -1,4 +1,4 @@
-"""Asynchronous HTTP Web Server serving sensor telemetry for Raspberry Pi Pico W."""
+"""Asynchronous HTTP Web Server serving sensor telemetry for Waveshare ESP32-C6-Zero."""
 
 import gc
 import json
@@ -15,9 +15,8 @@ except ImportError:
 class WebServer:
     """HTTP web server dynamically exposing telemetry and SenML endpoints."""
 
-    def __init__(self, app_state, reader=None, host="0.0.0.0", port=getattr(config, "HTTP_PORT", 80)):
+    def __init__(self, app_state, host="0.0.0.0", port=getattr(config, "HTTP_PORT", 80)):
         self.app_state = app_state
-        self.reader = reader
         self.host = host
         self.port = port
         self.server = None
@@ -55,12 +54,7 @@ class WebServer:
             # Ensure synchronous sensor read during semi-sleep
             if self.app_state.mode == MODE_SEMI_SLEEP:
                 ts = get_utc_iso_timestamp() if self.app_state.ntp_synced else None
-                if hasattr(self.app_state, "read_registered_sensors"):
-                    self.app_state.read_registered_sensors(timestamp=ts)
-                elif self.reader is not None:
-                    data = self.reader.read_sensors()
-                    data["timestamp"] = ts
-                    self.app_state.update_sensors(data)
+                self.app_state.read_registered_sensors(timestamp=ts)
 
             if method == "GET" and path == "/info":
                 payload = json.dumps(self.app_state.to_dict())
@@ -70,7 +64,7 @@ class WebServer:
                 self._send_json(writer, payload)
             elif method == "GET" and path.startswith("/sensors/"):
                 metric_key = path[len("/sensors/"):]
-                m = self.app_state.get_metric(metric_key) if hasattr(self.app_state, "get_metric") else None
+                m = self.app_state.get_metric(metric_key)
                 if m is not None:
                     senml_item = {
                         "n": metric_key,
@@ -134,3 +128,4 @@ async def run_webserver_task(app_state, host="0.0.0.0", port=getattr(config, "HT
     await server.start()
     while True:
         await asyncio.sleep(3600)
+

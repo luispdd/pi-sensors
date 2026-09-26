@@ -1,4 +1,4 @@
-"""Modular, sensor-agnostic application state for Raspberry Pi Pico 2 W."""
+"""Modular, sensor-agnostic application state for Waveshare ESP32-C6-Zero."""
 
 import time
 from settings import config
@@ -7,20 +7,14 @@ MODE_SENSOR_DISPLAY = 0
 MODE_SEMI_SLEEP = 1
 MODE_MESSAGE = 2
 
-# Data Logger State Constants
-LOGGER_IDLE = 0
-LOGGER_STAGING = 1
-LOGGER_CONFIRM = 2
-LOGGER_ACTIVE = 3
-
 
 class AppState:
-    """Sensor-agnostic application state managing telemetry, network, data logger, and operational modes."""
+    """Sensor-agnostic application state managing telemetry, network, and operational modes."""
 
     def __init__(self):
         # Network & device state
-        self.device_id = getattr(config, "DEVICE_ID", "pico-2w")
-        self.device_type = getattr(config, "DEVICE_TYPE", "rp2350")
+        self.device_id = getattr(config, "DEVICE_ID", "esp32c6")
+        self.device_type = getattr(config, "DEVICE_TYPE", "esp32c6")
         self.ip_address = None
         self.wifi_status = "config_error" if getattr(config, "WIFI_CONFIG_ERROR", None) else "disconnected"
         self.config_error = getattr(config, "WIFI_CONFIG_ERROR", None)
@@ -38,16 +32,6 @@ class AppState:
         self.last_caller = None
         self.known_nodes = {}
 
-        # Data Logger State & Buffers
-        self.logger_state = LOGGER_IDLE
-        self.logging_active = False
-        self.log_buffers = {}
-        self.log_buffered_count = 0
-        self.log_ntp_time_str = None
-        self.log_date_str = None
-        self.log_error = None
-        self.log_active_nodes = {}
-
         # Sensor registry: metric_key -> {"val": ..., "unit": ..., "ts": ..., "errors": ...}
         self._metrics = {}
         self._registered_sensors = []
@@ -59,6 +43,7 @@ class AppState:
         if sensor_driver not in self._registered_sensors:
             self._registered_sensors.append(sensor_driver)
 
+        # Inspect metrics exposed by sensor
         metrics = getattr(sensor_driver, "metrics", [])
         for m in metrics:
             key = m.get("key")
@@ -138,102 +123,33 @@ class AppState:
             senml_list.append(entry)
         return senml_list
 
-    # --- Backwards Compatibility Properties & Methods ---
+    # --- Backwards Compatibility Properties ---
 
     @property
     def temperature_c(self):
         return self.get_metric_val("temperature")
 
-    @temperature_c.setter
-    def temperature_c(self, val):
-        self.update_metric("temperature", val)
-
     @property
     def humidity_pct(self):
         return self.get_metric_val("humidity")
 
-    @humidity_pct.setter
-    def humidity_pct(self, val):
-        self.update_metric("humidity", val)
-
-    @property
-    def light_pct(self):
-        return self.get_metric_val("light")
-
-    @light_pct.setter
-    def light_pct(self, val):
-        self.update_metric("light", val)
-
-    def update_sensors(self, sensor_data):
-        """Updates internal telemetry from a legacy sensors dict."""
-        if "temperature_c" in sensor_data and sensor_data["temperature_c"] is not None:
-            self.update_metric("temperature", sensor_data["temperature_c"])
-        if "humidity_pct" in sensor_data and sensor_data["humidity_pct"] is not None:
-            self.update_metric("humidity", sensor_data["humidity_pct"])
-        if "light_pct" in sensor_data and sensor_data["light_pct"] is not None:
-            self.update_metric("light", sensor_data["light_pct"])
-        if "read_errors" in sensor_data:
-            self.read_errors = sensor_data["read_errors"]
-        if "timestamp" in sensor_data and sensor_data["timestamp"] is not None:
-            self.timestamp = sensor_data["timestamp"]
-            for m in self._metrics.values():
-                if m.get("val") is not None and m.get("ts") is None:
-                    m["ts"] = self.timestamp
-
-    # --- Data Logger Methods ---
-
-    def buffer_reading(self, device_id, ts, temp, hum, light=None):
-        """Appends reading to log_buffers[device_id] (max 13), and increments log_buffered_count."""
-        if device_id not in self.log_buffers:
-            self.log_buffers[device_id] = []
-        buf = self.log_buffers[device_id]
-        if len(buf) >= 13:
-            buf.pop(0)
-        else:
-            self.log_buffered_count += 1
-        buf.append({"ts": ts, "device_id": device_id, "temp": temp, "hum": hum, "light": light})
-
-    def retain_unflushed(self, count_flushed_per_device=12):
-        """Retains entries beyond the first count_flushed_per_device entries in log_buffers,
-
-        updating log_buffered_count accordingly.
-        """
-        total = 0
-        for dev_id, buf in list(self.log_buffers.items()):
-            self.log_buffers[dev_id] = buf[count_flushed_per_device:]
-            total += len(self.log_buffers[dev_id])
-        self.log_buffered_count = total
-
-    def clear_buffers(self):
-        """Resets in-memory log buffers and counter."""
-        self.log_buffers = {}
-        self.log_buffered_count = 0
-
-    def set_logger_error(self, msg):
-        """Sets logger error message to be displayed."""
-        self.log_error = str(msg)
-
-    def clear_logger_error(self):
-        """Clears logger error message."""
-        self.log_error = None
-
     # --- Mode Transitions ---
 
     def enter_sensor_mode(self):
-        """Transitions state to sensor display mode, clearing any alerts or pending messages."""
+        """Transitions state to sensor display mode, clearing alerts."""
         self.mode = MODE_SENSOR_DISPLAY
         self.alert_message = ""
         self.display_override_text = None
         self.pending_message = None
 
     def enter_semi_sleep(self):
-        """Transitions state to semi-sleep mode (display off, sensor sampling idle)."""
+        """Transitions state to semi-sleep mode (display off, periodic polling suspended)."""
         self.mode = MODE_SEMI_SLEEP
         self.alert_message = ""
         self.display_override_text = None
 
     def enter_message_mode(self, text, caller=None):
-        """Transitions state to message override mode, displaying text."""
+        """Transitions state to message display mode."""
         self.mode = MODE_MESSAGE
         self.alert_message = text
         self.display_override_text = text
@@ -242,7 +158,7 @@ class AppState:
             self.last_caller = self.resolve_caller(caller)
 
     def set_pending_message(self, text, caller=None):
-        """Stores a pending message for semi-sleep mode and updates caller."""
+        """Stores a pending message for semi-sleep mode."""
         self.pending_message = text
         if caller is not None:
             self.last_caller = self.resolve_caller(caller)
@@ -294,7 +210,7 @@ class AppState:
             return 0
 
     def to_dict(self):
-        """Dictionary representation for JSON API responses."""
+        """Dictionary representation for JSON API /info responses."""
         res = {
             "device_id": self.device_id,
             "device_type": self.device_type,
@@ -305,7 +221,7 @@ class AppState:
             "mode": self.mode,
             "status": "ok",
         }
-        # Dynamic sensor metrics
+        # Include dynamic sensor metrics
         for key, m in self._metrics.items():
             res[key] = m.get("val")
             res[f"{key}_unit"] = m.get("unit")
@@ -315,7 +231,5 @@ class AppState:
             res["temperature_c"] = self._metrics["temperature"].get("val")
         if "humidity" in self._metrics:
             res["humidity_pct"] = self._metrics["humidity"].get("val")
-        if "light" in self._metrics:
-            res["light_pct"] = self._metrics["light"].get("val")
 
         return res

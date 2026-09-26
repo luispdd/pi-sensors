@@ -171,6 +171,71 @@ class TestPollerService(unittest.IsolatedAsyncioTestCase):
     async def test_poller_sync(self):
         await test_poller_sync()
 
+    async def test_esp32c6_discovery_probe_and_telemetry(self):
+        """Validate esp32c6 node discovery, capability probe, and telemetry ingestion."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_db = Path(tmpdir) / "test_esp32c6.db"
+            db.init_db(test_db)
+
+            class MockEsp32c6CoapClient:
+                async def discover_nodes(self):
+                    return [
+                        {
+                            "device_id": "esp32c6",
+                            "ip_address": "192.168.1.139",
+                            "capabilities": ["core.d", "sensor-collection", "humidity", "temperature", "display"],
+                        }
+                    ]
+
+                async def get_sensors(self, ip, port=None):
+                    return [
+                        {"v": 28.2, "u": "Cel", "t": "2026-09-26T14:30:00", "n": "temperature"},
+                        {"v": 31.9, "u": "%", "t": "2026-09-26T14:30:00", "n": "humidity"},
+                    ]
+
+            mock_client = MockEsp32c6CoapClient()
+            poller = PollerService(db_path=test_db, coap_client=mock_client)
+
+            # 1. Discovery and capability probe
+            discovered = await poller.discover_and_register()
+            self.assertEqual(len(discovered), 1)
+            self.assertEqual(discovered[0]["device_id"], "esp32c6")
+            self.assertEqual(discovered[0]["ip_address"], "192.168.1.139")
+
+            nodes = db.get_nodes(test_db)
+            self.assertEqual(len(nodes), 1)
+            self.assertEqual(nodes[0]["device_id"], "esp32c6")
+
+            # 2. Verify probed sensor capabilities
+            caps = db.get_all_capabilities(test_db)
+            self.assertEqual(len(caps), 2)
+            cap_map = {c["metric_key"]: c["unit"] for c in caps}
+            self.assertEqual(cap_map, {"temperature": "Cel", "humidity": "%"})
+
+            # 3. Telemetry ingestion for esp32c6
+            records = [
+                {
+                    "ts": "2026-09-26T14:30:00",
+                    "device_id": "esp32c6",
+                    "temp": 28.2,
+                    "hum": 31.9,
+                },
+                {
+                    "ts": "2026-09-26T14:35:00",
+                    "device_id": "esp32c6",
+                    "temp": 28.5,
+                    "hum": 32.1,
+                },
+            ]
+            ingested = db.insert_readings(records, default_device_id="esp32c6", db_path=test_db)
+            self.assertEqual(ingested, 2)
+
+            # Query readings by device_id
+            readings = db.query_readings(device_id="esp32c6", db_path=test_db)
+            self.assertEqual(len(readings), 2)
+            self.assertEqual(readings[0]["device_id"], "esp32c6")
+            self.assertEqual(readings[1]["device_id"], "esp32c6")
+
 
 if __name__ == "__main__":
     unittest.main()

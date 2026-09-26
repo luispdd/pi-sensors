@@ -122,3 +122,37 @@ class NetworkManager:
                 self.status = "connected"
                 self.ip_address = self.wlan.ifconfig()[0]
                 await asyncio.sleep(5.0)
+
+
+async def run_network_task(app_state, net_mgr):
+    """Manages WiFi connection lifecycle and updates network state in AppState."""
+    if config.WIFI_CONFIG_ERROR:
+        app_state.update_wifi("config_error", config_error=config.WIFI_CONFIG_ERROR)
+        print(f"[network] WiFi disabled: {config.WIFI_CONFIG_ERROR}")
+        while True:
+            await asyncio.sleep(30.0)
+
+    app_state.update_wifi("connecting")
+    connected = await net_mgr.connect(timeout_s=15)
+    if connected:
+        app_state.update_wifi("connected", ip=net_mgr.get_ip())
+    else:
+        app_state.update_wifi("disconnected")
+
+    while True:
+        try:
+            if not net_mgr.is_connected():
+                app_state.update_wifi("connecting")
+                connected = await net_mgr.connect(timeout_s=12)
+                if connected:
+                    app_state.update_wifi("connected", ip=net_mgr.get_ip())
+                else:
+                    app_state.update_wifi("disconnected")
+                    await asyncio.sleep(config.WIFI_RETRY_INTERVAL_S)
+            else:
+                app_state.update_wifi("connected", ip=net_mgr.get_ip())
+                await asyncio.sleep(5.0)
+        except Exception as e:
+            print(f"[network] Error in network task: {e}")
+            await asyncio.sleep(5.0)
+
