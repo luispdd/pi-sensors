@@ -188,11 +188,46 @@ class TFTDisplay:
         except Exception as e:
             print(f"[display] Confirm render error: {e}")
 
+    def render_details(self, file_list, page=0, lines_per_page=10, error=None):
+        """Renders paginated SD file listing for DETAILS_MODE."""
+        if self.tft is None:
+            return
+        try:
+            self._acquire_bus()
+            self.tft.fill(TFT.BLACK)
+
+            # Header
+            self.tft.text((5, 5), "[SD Files]", TFT.CYAN, sysfont, 1)
+            self.tft.line((0, 18), (self.width, 18), TFT.WHITE)
+
+            if error:
+                self.tft.text((5, 25), str(error)[:self.MAX_LINE_LEN], TFT.RED, sysfont, 1)
+                return
+
+            if not file_list:
+                self.tft.text((5, 25), "No files found", TFT.YELLOW, sysfont, 1)
+                return
+
+            start_idx = page * lines_per_page
+            page_files = file_list[start_idx : start_idx + lines_per_page]
+            has_more = (start_idx + lines_per_page) < len(file_list)
+
+            y = 24
+            for fname in page_files:
+                self.tft.text((5, y), str(fname)[:self.MAX_LINE_LEN], TFT.WHITE, sysfont, 1)
+                y += 12
+
+            if has_more:
+                self.tft.text((5, y), "<Next page>", TFT.YELLOW, sysfont, 1)
+        except Exception as e:
+            print(f"[display] Render details error: {e}")
+
     def render_status(
         self,
         temp=None,
         hum=None,
         light=None,
+        pir=None,
         ip=None,
         wifi_status="connected",
         requests_served=0,
@@ -225,30 +260,34 @@ class TFTDisplay:
             line0 = f"T:{t_str} H:{h_str} L:{l_str}"
             self.tft.text((5, 8), line0, TFT.GREEN, sysfont, 1)
 
-            # Network Status
+            # PIR Activity Line at y=22
+            pir_str = f"{pir:.0f}%" if pir is not None else "--"
+            self.tft.text((5, 22), f"PIR: {pir_str}", TFT.GREEN, sysfont, 1)
+
+            # Network Status (shifted down by 14px: y=36, y=50)
             if config_error or wifi_status == "config_error":
                 err_msg = config_error if config_error else "Config Error"
-                self.tft.text((5, 24), err_msg[:self.MAX_LINE_LEN], TFT.RED, sysfont, 1)
-                self.tft.text((5, 38), "Check secrets.py", TFT.YELLOW, sysfont, 1)
+                self.tft.text((5, 36), err_msg[:self.MAX_LINE_LEN], TFT.RED, sysfont, 1)
+                self.tft.text((5, 50), "Check secrets.py", TFT.YELLOW, sysfont, 1)
             elif ip and wifi_status == "connected":
                 clean_ip = str(ip).replace("http://", "").replace("https://", "").strip()
-                self.tft.text((5, 24), clean_ip[:self.MAX_LINE_LEN], TFT.WHITE, sysfont, 1)
-                self.tft.text((5, 38), "CoAP: /display", TFT.CYAN, sysfont, 1)
+                self.tft.text((5, 36), clean_ip[:self.MAX_LINE_LEN], TFT.WHITE, sysfont, 1)
+                self.tft.text((5, 50), "CoAP: /display", TFT.CYAN, sysfont, 1)
             else:
                 status_label = "Connecting..." if wifi_status == "connecting" else "WiFi: Offline"
-                self.tft.text((5, 24), status_label[:self.MAX_LINE_LEN], TFT.YELLOW, sysfont, 1)
-                self.tft.text((5, 38), "Waiting for net", TFT.WHITE, sysfont, 1)
+                self.tft.text((5, 36), status_label[:self.MAX_LINE_LEN], TFT.YELLOW, sysfont, 1)
+                self.tft.text((5, 50), "Waiting for net", TFT.WHITE, sysfont, 1)
 
-            # Requests served
-            self.tft.text((5, 52), f"Reqs: {requests_served}", TFT.WHITE, sysfont, 1)
+            # Requests served at y=64
+            self.tft.text((5, 64), f"Reqs: {requests_served}", TFT.WHITE, sysfont, 1)
 
-            # Last caller
+            # Last caller at y=78
             caller_str = str(last_caller) if last_caller else "--"
-            self.tft.text((5, 66), f"Last: {caller_str}", TFT.PURPLE, sysfont, 1)
+            self.tft.text((5, 78), f"Last: {caller_str}", TFT.PURPLE, sysfont, 1)
 
             # Logging Section (rendered when logging_active is True)
             if logging_active:
-                divider_y = 78
+                divider_y = 92
                 self.tft.line((0, divider_y), (self.width, divider_y), TFT.WHITE)
 
                 # Format active board names: up to 7 characters each, wrapping across up to two lines
@@ -272,12 +311,12 @@ class TFTDisplay:
                 if curr:
                     log_lines.append(curr)
 
-                y_log = 84
+                y_log = 98
                 for l in log_lines[:2]:
                     self.tft.text((5, y_log), l[:max_line_len], TFT.CYAN, sysfont, 1)
                     y_log += 12
 
-                # Buffered readings line
+                # Buffered readings line at y=122
                 buf_line = f"Buf: {log_buffered_count} reads"
                 self.tft.text((5, y_log), buf_line[:max_line_len], TFT.YELLOW, sysfont, 1)
                 y_log += 12
@@ -318,6 +357,7 @@ class TFTDisplay:
             temp=app_state.temperature_c,
             hum=app_state.humidity_pct,
             light=getattr(app_state, "light_pct", None),
+            pir=getattr(app_state, "motion_pct", getattr(app_state, "pir_activity", None)),
             ip=app_state.ip_address,
             wifi_status=app_state.wifi_status,
             requests_served=app_state.requests_served,
@@ -336,6 +376,7 @@ class TFTDisplay:
         temp=None,
         hum=None,
         light=None,
+        pir=None,
         ip=None,
         wifi_status="connected",
         requests_served=0,
@@ -353,6 +394,7 @@ class TFTDisplay:
                 temp=temp,
                 hum=hum,
                 light=light,
+                pir=pir,
                 ip=ip,
                 wifi_status=wifi_status,
                 requests_served=requests_served,

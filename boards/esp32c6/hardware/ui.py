@@ -22,6 +22,7 @@ except ImportError:
 MODE_SENSOR_DISPLAY = 0
 MODE_SEMI_SLEEP = 1
 MODE_MESSAGE = 2
+MODE_DETAILS = 3
 
 
 class UIController:
@@ -207,6 +208,51 @@ class UIController:
         except Exception as e:
             print(f"[ui] Render sensor view error: {e}")
 
+    METRIC_LABELS = {
+        "temperature": "T",
+        "humidity": "H",
+        "light": "L",
+        "motion": "M",
+        "noise": "N",
+        "sound": "N",
+    }
+
+    def render_details_view(self, app_state):
+        """Renders DETAILS_MODE: header + cur/min/max table for each registered metric."""
+        if self.oled is None or not self.display_on:
+            return
+        try:
+            self.oled.fill(0)
+            # Header row at y=0
+            self.oled.text("[DETAILS]", 0, 0)
+
+            metrics = app_state.get_all_metrics() if hasattr(app_state, "get_all_metrics") else {}
+            # Ordered display: temperature first, humidity second, then any additional registered metric
+            known_order = ["temperature", "humidity"]
+            keys_to_show = [k for k in known_order if k in metrics]
+            for k in metrics:
+                if k not in keys_to_show:
+                    keys_to_show.append(k)
+
+            # Up to 3 metric rows: y=12, 24, 36 (fits within 64px display)
+            y = 12
+            for key in keys_to_show[:3]:
+                label = self.METRIC_LABELS.get(key, key[:1].upper())
+                m = metrics.get(key, {})
+                cur = m.get("val")
+                mn  = m.get("min")
+                mx  = m.get("max")
+                cur_s = f"{cur:.1f}" if cur is not None else "--"
+                mn_s  = f"{mn:.1f}"  if mn  is not None else "--"
+                mx_s  = f"{mx:.1f}"  if mx  is not None else "--"
+                row = f"{label}:{cur_s} {mn_s} {mx_s}"
+                self.oled.text(row[:self.MAX_LINE_LEN], 0, y)
+                y += 12
+
+            self.oled.show()
+        except Exception as e:
+            print(f"[ui] Details view render error: {e}")
+
     def update(self, app_state):
         """Called by the main loop to refresh the UI based on current app state."""
         if app_state is None:
@@ -225,52 +271,68 @@ class UIController:
         if mode == MODE_MESSAGE or (hasattr(app_state, "is_display_overridden") and app_state.is_display_overridden()):
             msg = getattr(app_state, "display_override_text", None) or getattr(app_state, "pending_message", "")
             self.show_message(msg)
+        elif mode == MODE_DETAILS:
+            self.render_details_view(app_state)
         else:
             self.render_sensor_view(app_state)
 
     def handle_button(self, press_type: str, app_state):
-        """Executes operational transitions for short or long button press."""
-        if press_type == "long":
-            self.toggle_display()
-            return
+        """Executes operational transitions for the primary button.
 
-        # Short press transitions
+        press_type:
+          'long'  - held >= 1000ms: enter SEMI_SLEEP from any active mode.
+          'short' - released < 1000ms: cycle STATUS <-> DETAILS, or discard message.
+          'wake'  - falling edge while in SEMI_SLEEP: restore previous mode.
+        """
         mode = getattr(app_state, "mode", MODE_SENSOR_DISPLAY)
 
-        if mode == MODE_SENSOR_DISPLAY:
-            print("[ui] Button short press: entering SEMI_SLEEP")
+        if press_type == "wake" or mode == MODE_SEMI_SLEEP:
+            print("[ui] Button press: waking from SEMI_SLEEP, restoring previous mode")
+            if hasattr(app_state, "restore_previous_mode"):
+                app_state.restore_previous_mode()
+            else:
+                app_state.mode = MODE_SENSOR_DISPLAY
+            self.power_on()
+            return
+
+        if press_type == "long":
+            print("[ui] Button long press: entering SEMI_SLEEP")
             if hasattr(app_state, "enter_semi_sleep"):
                 app_state.enter_semi_sleep()
             else:
                 app_state.mode = MODE_SEMI_SLEEP
             self.power_off()
+            return
 
-        elif mode == MODE_SEMI_SLEEP:
-            if hasattr(app_state, "has_pending_message") and app_state.has_pending_message():
-                print("[ui] Button short press: showing pending message")
-                msg = app_state.pending_message
-                if hasattr(app_state, "enter_message_mode"):
-                    app_state.enter_message_mode(msg)
-                else:
-                    app_state.mode = MODE_MESSAGE
-            else:
-                print("[ui] Button short press: resuming sensor display")
-                if hasattr(app_state, "enter_sensor_mode"):
-                    app_state.enter_sensor_mode()
-                else:
-                    app_state.mode = MODE_SENSOR_DISPLAY
-            self.power_on()
-
-        elif mode == MODE_MESSAGE:
-            print("[ui] Button short press: clearing message, resuming sensor display")
-            if hasattr(app_state, "enter_sensor_mode"):
-                app_state.enter_sensor_mode()
+        # Short press transitions
+        if mode == MODE_MESSAGE:
+            print("[ui] Button short press: discarding message, restoring previous mode")
+            if hasattr(app_state, "restore_previous_mode"):
+                app_state.restore_previous_mode()
             else:
                 app_state.mode = MODE_SENSOR_DISPLAY
             self.power_on()
 
+        elif mode == MODE_SENSOR_DISPLAY:
+            print("[ui] Button short press: STATUS_MODE -> DETAILS_MODE")
+            if hasattr(app_state, "enter_details_mode"):
+                app_state.enter_details_mode()
+            else:
+                app_state.mode = MODE_DETAILS
+
+        elif mode == MODE_DETAILS:
+            print("[ui] Button short press: DETAILS_MODE -> STATUS_MODE")
+            if hasattr(app_state, "enter_sensor_mode"):
+                app_state.enter_sensor_mode()
+            else:
+                app_state.mode = MODE_SENSOR_DISPLAY
+
     def poll_button(self, app_state):
-        """Polls button input pin and evaluates press duration."""
+        """Polls button input pin and evaluates press duration.
+
+        When in SEMI_SLEEP the wakeup fires immediately on the falling edge
+        (button pressed) so the user does not need to hold or release cleanly.
+        """
         if self.button_pin is None:
             return
 
@@ -278,22 +340,23 @@ class UIController:
             val = self.button_pin.value()
             now = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
 
-            # Button is pressed (active LOW)
-            if val == 0:
-                if self._btn_last_val == 1:
+            # Falling edge detected (button pressed, active LOW)
+            if val == 0 and self._btn_last_val == 1:
+                mode = getattr(app_state, "mode", MODE_SENSOR_DISPLAY)
+                if mode == MODE_SEMI_SLEEP:
+                    # Wake immediately on press — no need to wait for release
+                    self.handle_button("wake", app_state)
+                else:
                     self._btn_pressed_time = now
-            else:
-                # Button is released
-                if self._btn_last_val == 0 and self._btn_pressed_time is not None:
-                    duration = (now - self._btn_pressed_time) if hasattr(time, "ticks_ms") else int((time.time() * 1000) - self._btn_pressed_time)
-                    if hasattr(time, "ticks_diff"):
-                        duration = time.ticks_diff(now, self._btn_pressed_time)
 
-                    self._btn_pressed_time = None
-                    if duration >= 1000:
-                        self.handle_button("long", app_state)
-                    elif duration >= 50:  # Debounce minimum 50ms
-                        self.handle_button("short", app_state)
+            # Rising edge detected (button released)
+            elif val == 1 and self._btn_last_val == 0 and self._btn_pressed_time is not None:
+                duration = time.ticks_diff(now, self._btn_pressed_time) if hasattr(time, "ticks_diff") else (now - self._btn_pressed_time)
+                self._btn_pressed_time = None
+                if duration >= 1000:
+                    self.handle_button("long", app_state)
+                elif duration >= 50:  # Debounce minimum 50ms
+                    self.handle_button("short", app_state)
 
             self._btn_last_val = val
         except Exception as e:

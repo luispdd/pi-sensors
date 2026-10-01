@@ -208,3 +208,16 @@ class SDStorage:
             return True
         finally:
             self.unmount()
+
+    def list_files(self, path):
+        """Lists and returns sorted filenames in path.
+
+        Assumes SD is already mounted by caller.
+        Returns empty list if path does not exist or listdir fails.
+        """
+        try:
+            files = os.listdir(path)
+            return sorted(files)
+        except Exception:
+            return []
+

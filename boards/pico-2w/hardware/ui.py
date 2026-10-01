@@ -9,6 +9,7 @@ from hardware.controls import Button, ButtonLog, AlertLED
 MODE_SENSOR_DISPLAY = 0
 MODE_SEMI_SLEEP = 1
 MODE_MESSAGE = 2
+MODE_DETAILS = 3
 
 # Data Logger State Constants
 LOGGER_IDLE = 0
@@ -38,6 +39,12 @@ class UIController:
 
         # Active background flush loop task
         self._active_flush_loop_task = None
+
+        # SD file listing state for DETAILS_MODE
+        self._sd_file_list = []
+        self._sd_file_page = 0
+        self._sd_storage = None
+        self._sd_error = None
 
     def power_off(self):
         """Blanks the TFT display for semi-sleep mode."""
@@ -83,15 +90,17 @@ class UIController:
         if not self.display_on:
             return
 
-        metrics = app_state.get_all_metrics() if hasattr(app_state, "get_all_metrics") else {}
-        t_val = metrics.get("temperature", {}).get("val") if "temperature" in metrics else getattr(app_state, "temperature_c", None)
-        h_val = metrics.get("humidity", {}).get("val") if "humidity" in metrics else getattr(app_state, "humidity_pct", None)
-        l_val = metrics.get("light", {}).get("val") if "light" in metrics else getattr(app_state, "light_pct", None)
+        get_val = getattr(app_state, "get_metric_val", None)
+        t_val = get_val("temperature") if get_val else getattr(app_state, "temperature_c", None)
+        h_val = get_val("humidity") if get_val else getattr(app_state, "humidity_pct", None)
+        l_val = get_val("light") if get_val else getattr(app_state, "light_pct", None)
+        p_val = get_val("motion") if get_val else getattr(app_state, "motion_pct", None)
 
         self.display.render_status(
             temp=t_val,
             hum=h_val,
             light=l_val,
+            pir=p_val,
             ip=getattr(app_state, "ip_address", None),
             wifi_status=getattr(app_state, "wifi_status", "disconnected"),
             requests_served=getattr(app_state, "requests_served", 0),
@@ -103,6 +112,17 @@ class UIController:
             log_buffered_count=getattr(app_state, "log_buffered_count", 0),
             log_ntp_time_str=getattr(app_state, "log_ntp_time_str", None),
             log_error=getattr(app_state, "log_error", None),
+        )
+
+    def render_details_view(self, app_state=None, lines_per_page=10):
+        """Renders paginated SD file listing on TFT display for DETAILS_MODE."""
+        if not self.display_on:
+            return
+        self.display.render_details(
+            file_list=self._sd_file_list,
+            page=self._sd_file_page,
+            lines_per_page=lines_per_page,
+            error=self._sd_error,
         )
 
     def update(self, app_state):
@@ -146,20 +166,36 @@ class UIController:
         if mode == MODE_MESSAGE or (hasattr(app_state, "is_display_overridden") and app_state.is_display_overridden()):
             msg = getattr(app_state, "display_override_text", None) or getattr(app_state, "pending_message", "")
             self.show_message(msg)
+        elif mode == MODE_DETAILS:
+            self.render_details_view(app_state)
         else:
             self.render_sensor_view(app_state)
 
     def handle_button(self, press_type: str, app_state):
-        """Executes operational transitions for primary reset/mode button (GP14)."""
-        if press_type == "long":
-            self.toggle_display()
-            return
+        """Executes operational transitions for primary reset/mode button (GP14).
 
-        # Short press transitions
+        press_type:
+          'long'  - held >= 1000ms: enter SEMI_SLEEP from any active mode.
+          'short' - released < 1000ms: cycle STATUS <-> DETAILS, or discard message.
+          'wake'  - falling edge while in SEMI_SLEEP: restore previous mode.
+        """
         mode = getattr(app_state, "mode", MODE_SENSOR_DISPLAY)
 
-        if mode == MODE_SENSOR_DISPLAY:
-            print("[ui] Button short press: entering SEMI_SLEEP")
+        if press_type == "wake" or mode == MODE_SEMI_SLEEP:
+            print("[ui] Button press: waking from SEMI_SLEEP, restoring previous mode")
+            if hasattr(app_state, "restore_previous_mode"):
+                app_state.restore_previous_mode()
+            else:
+                app_state.mode = MODE_SENSOR_DISPLAY
+            if getattr(app_state, "mode", None) == MODE_DETAILS:
+                self._load_sd_file_list(self._sd_storage)
+            self.power_on()
+            if self.alert_led:
+                self.alert_led.off()
+            return
+
+        if press_type == "long":
+            print("[ui] Button long press: entering SEMI_SLEEP")
             if hasattr(app_state, "enter_semi_sleep"):
                 app_state.enter_semi_sleep()
             else:
@@ -167,39 +203,82 @@ class UIController:
             self.power_off()
             if self.alert_led:
                 self.alert_led.off()
+            return
 
-        elif mode == MODE_SEMI_SLEEP:
-            if hasattr(app_state, "has_pending_message") and app_state.has_pending_message():
-                print("[ui] Button short press: showing pending message")
-                msg = app_state.pending_message
-                if hasattr(app_state, "enter_message_mode"):
-                    app_state.enter_message_mode(msg)
-                else:
-                    app_state.mode = MODE_MESSAGE
-                if self.alert_led:
-                    self.alert_led.on()
-            else:
-                print("[ui] Button short press: resuming sensor display")
-                if hasattr(app_state, "enter_sensor_mode"):
-                    app_state.enter_sensor_mode()
-                else:
-                    app_state.mode = MODE_SENSOR_DISPLAY
-                if self.alert_led:
-                    self.alert_led.off()
-            self.power_on()
-
-        elif mode == MODE_MESSAGE:
-            print("[ui] Button short press: clearing message, resuming sensor display")
-            if hasattr(app_state, "enter_sensor_mode"):
-                app_state.enter_sensor_mode()
+        # Short press transitions
+        if mode == MODE_MESSAGE:
+            print("[ui] Button short press: discarding message, restoring previous mode")
+            if hasattr(app_state, "restore_previous_mode"):
+                app_state.restore_previous_mode()
             else:
                 app_state.mode = MODE_SENSOR_DISPLAY
+            if getattr(app_state, "mode", None) == MODE_DETAILS:
+                self._load_sd_file_list(self._sd_storage)
             self.power_on()
             if self.alert_led:
                 self.alert_led.off()
 
+        elif mode == MODE_SENSOR_DISPLAY:
+            print("[ui] Button short press: STATUS_MODE -> DETAILS_MODE")
+            self._load_sd_file_list(self._sd_storage)
+            if hasattr(app_state, "enter_details_mode"):
+                app_state.enter_details_mode()
+            else:
+                app_state.mode = MODE_DETAILS
+
+        elif mode == MODE_DETAILS:
+            print("[ui] Button short press: DETAILS_MODE -> STATUS_MODE")
+            if hasattr(app_state, "enter_sensor_mode"):
+                app_state.enter_sensor_mode()
+            else:
+                app_state.mode = MODE_SENSOR_DISPLAY
+
+    def _load_sd_file_list(self, sd_storage=None):
+        """Mounts SD, reads /sd/sensor-data files, caches in _sd_file_list, and unmounts."""
+        storage = sd_storage if sd_storage is not None else self._sd_storage
+        if storage is None:
+            self._sd_file_list = []
+            self._sd_file_page = 0
+            self._sd_error = "SD: unavailable"
+            return
+
+        try:
+            storage.mount()
+            try:
+                self._sd_file_list = storage.list_files("/sd/sensor-data")
+                self._sd_file_page = 0
+                self._sd_error = None
+            finally:
+                storage.unmount()
+        except Exception as e:
+            print(f"[ui] Error loading SD file list: {e}")
+            self._sd_file_list = []
+            self._sd_file_page = 0
+            self._sd_error = "SD: unavailable"
+
+    def _advance_file_page(self, lines_per_page=10):
+        """Increments _sd_file_page, wrapping to 0 after the last page."""
+        total_files = len(self._sd_file_list)
+        if total_files <= lines_per_page:
+            self._sd_file_page = 0
+            return
+
+        total_pages = (total_files + lines_per_page - 1) // lines_per_page
+        self._sd_file_page = (self._sd_file_page + 1) % total_pages
+        print(f"[ui] Advanced SD file page to {self._sd_file_page} of {total_pages}")
+
     def handle_button_log(self, rel: str, app_state, data_logger=None):
         """Dispatches data logger lifecycle transitions based on secondary button (GP13)."""
+        mode = getattr(app_state, "mode", MODE_SENSOR_DISPLAY)
+
+        if mode == MODE_DETAILS:
+            if rel == "short":
+                self._advance_file_page()
+            return
+
+        if mode != MODE_SENSOR_DISPLAY:
+            return
+
         if data_logger is None:
             return
 
@@ -236,7 +315,11 @@ class UIController:
                 asyncio.create_task(data_logger.stop_and_flush())
 
     def poll_button(self, app_state):
-        """Polls primary button (GP14) and evaluates press duration."""
+        """Polls primary button (GP14) and evaluates press duration.
+
+        When in SEMI_SLEEP the wakeup fires immediately on the falling edge
+        (button pressed) so the user does not need to hold or release cleanly.
+        """
         if self.button is None or self.button.pin is None:
             return
 
@@ -244,20 +327,23 @@ class UIController:
             val = self.button.pin.value()
             now = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
 
-            if val == 0:
-                if self._btn_last_val == 1:
+            # Falling edge detected (button pressed, active LOW)
+            if val == 0 and self._btn_last_val == 1:
+                mode = getattr(app_state, "mode", MODE_SENSOR_DISPLAY)
+                if mode == MODE_SEMI_SLEEP:
+                    # Wake immediately on press — no need to wait for release
+                    self.handle_button("wake", app_state)
+                else:
                     self._btn_pressed_time = now
-            else:
-                if self._btn_last_val == 0 and self._btn_pressed_time is not None:
-                    duration = (now - self._btn_pressed_time) if hasattr(time, "ticks_ms") else int((time.time() * 1000) - self._btn_pressed_time)
-                    if hasattr(time, "ticks_diff"):
-                        duration = time.ticks_diff(now, self._btn_pressed_time)
 
-                    self._btn_pressed_time = None
-                    if duration >= 1000:
-                        self.handle_button("long", app_state)
-                    elif duration >= 50:
-                        self.handle_button("short", app_state)
+            # Rising edge detected (button released)
+            elif val == 1 and self._btn_last_val == 0 and self._btn_pressed_time is not None:
+                duration = time.ticks_diff(now, self._btn_pressed_time) if hasattr(time, "ticks_diff") else (now - self._btn_pressed_time)
+                self._btn_pressed_time = None
+                if duration >= 1000:
+                    self.handle_button("long", app_state)
+                elif duration >= 50:  # Debounce minimum 50ms
+                    self.handle_button("short", app_state)
 
             self._btn_last_val = val
         except Exception as e:
@@ -290,8 +376,10 @@ class UIController:
                 print(f"[ui] Error in display task: {e}")
                 await asyncio.sleep(config.DISPLAY_REFRESH_INTERVAL_S)
 
-    async def run_button_task(self, app_state, data_logger=None):
+    async def run_button_task(self, app_state, data_logger=None, sd_storage=None):
         """Asynchronously polls both physical buttons."""
+        if sd_storage is not None:
+            self._sd_storage = sd_storage
         try:
             import uasyncio as asyncio
         except ImportError:

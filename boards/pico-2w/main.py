@@ -47,7 +47,7 @@ async def main():
         run_sensor_task(app_state),
         pir_sensor.run_sampling_task(),
         ui.run_display_task(app_state),
-        ui.run_button_task(app_state, data_logger=data_logger),
+        ui.run_button_task(app_state, data_logger=data_logger, sd_storage=sd_storage),
         run_network_task(app_state, net_mgr),
         run_webserver_task(app_state),
         run_coap_task(app_state, coap_server=coap_server),

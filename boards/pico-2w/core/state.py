@@ -185,6 +185,14 @@ class AppState:
     def motion_pct(self, val):
         self.update_metric("motion", val)
 
+    @property
+    def pir_activity(self):
+        return self.get_metric_val("motion")
+
+    @pir_activity.setter
+    def pir_activity(self, val):
+        self.update_metric("motion", val)
+
     def update_sensors(self, sensor_data):
         """Updates internal telemetry from a legacy sensors dict."""
         if "temperature_c" in sensor_data and sensor_data["temperature_c"] is not None:
