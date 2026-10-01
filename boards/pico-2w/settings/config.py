@@ -42,10 +42,12 @@ WIFI_RETRY_INTERVAL_S = 10
 PIN_PIR = 12        # GP12 (Pin 16) - AM312 PIR motion sensor (active HIGH)
 PIN_DHT22 = 15      # GP15 (Pin 20) - DHT22 Data line
 PIN_LIGHT_ADC = 26  # GP26 (Pin 31) - ADC0 for ADA2748 ALS-PT19 light sensor
+PIN_MIC_ADC = 27    # GP27 (Pin 32) - ADC1 for MAX4466 electret microphone
 LIGHT_SCALE_FACTOR = 4.0  # Linear scaling multiplier (8.0x: ~5% raw daylight -> 40%)
 PIN_BUTTON = 14     # GP14 (Pin 19) - Reset/Acknowledge button (active LOW, internal pull-up)
 PIN_BUTTON_LOG = 13 # GP13 (Pin 17) - Data logger control button (active LOW, internal pull-up)
 PIN_LED_ALERT = "LED" 
+ 
 
 SPI_BUS = 0
 SPI_SCK = 18    # GP18 - Pin 24 - shared SCK

@@ -1,2 +1,3 @@
 -Do not ever stage or commit files on your own.
 -Don't modify the external libraries, like `lib/microcoapy`, etc. in the codebase.
+-Don't ever take decisions about new functionalities or user-facing changes without consulting the user.

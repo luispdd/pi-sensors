@@ -2,23 +2,115 @@
 
 ## Purpose
 
-Provides firmware implementation and hardware interfacing for the Waveshare ESP32-C6-Zero node, integrating environmental sensing, local display, button controls, and onboard RGB LED status indication into the IoTMesh sensor network.
+Provides firmware implementation and hardware interfacing for the Waveshare ESP32-C6-Zero node, integrating environmental sensing, local display, button controls, onboard RGB LED status indication, and audio sensing into the IoTMesh sensor network.
+
+## Board Hardware Architecture & Layout Reference
+
+### Board Details
+- **Model**: Waveshare ESP32-C6-Zero-M (Header version, SKU: 26976) / ESP32-C6-Zero (SKU: 27035)
+- **SoC**: Espressif ESP32-C6FH8
+- **Core Architecture**:
+  - High-Performance (HP) Core: 32-bit RISC-V single-core up to 160 MHz
+  - Low-Power (LP) Core: 32-bit RISC-V coprocessor up to 20 MHz
+- **Memory**:
+  - 8 MB In-Package SPI Flash
+  - 512 KB HP SRAM
+  - 16 KB LP SRAM
+  - 320 KB ROM
+- **Wireless Connectivity**:
+  - Wi-Fi 6 (2.4 GHz 802.11ax/b/g/n)
+  - Bluetooth 5 (LE)
+  - IEEE 802.15.4 (Zigbee 3.0 and Thread)
+- **Power**:
+  - 5V Input via USB-C or 5V pin
+  - Onboard 3.3V LDO: ME6217C33M5G (800 mA max output)
+- **Onboard Peripherals**:
+  - Onboard Addressable WS2812 RGB LED (NeoPixel) on GPIO 8 (Color order: `ORDER = (0, 1, 2, 3)` RGB)
+  - BOOT Button: Connected to GPIO 9 (active LOW, strapping pin)
+  - RESET Button: Connected to CHIP_PU (active LOW hardware reset)
+  - Ceramic 2.4 GHz Antenna
+
+### Pinout Header Layout
+
+The board features a dual-row 18-pin DIP header (2×9 pins) with 2.54mm pitch and castellated edges:
+
+```
+                  +---[ USB-C ]---+
+   (Left Header)  |               |  (Right Header)
+  Left 1:   5V   -| [ ]       [ ] |-  Right 1:  TX (GP16)
+  Left 2:  GND   -| [ ]       [ ] |-  Right 2:  RX (GP17)
+  Left 3:  3V3   -| [ ]       [ ] |-  Right 3:  GP14
+  Left 4:  GP0   -| [ ]   C6  [ ] |-  Right 4:  GP15
+  Left 5:  GP1   -| [ ]       [ ] |-  Right 5:  GP18
+  Left 6:  GP2   -| [ ]  RGB  [ ] |-  Right 6:  GP19
+  Left 7:  GP3   -| [ ] (GP8) [ ] |-  Right 7:  GP20
+  Left 8:  GP4   -| [ ]       [ ] |-  Right 8:  GP21
+  Left 9:  GP5   -| [ ]       [ ] |-  Right 9:  GP22
+                  +---------------+
+```
+
+### Complete Hardware Pin Mapping Table
+
+| Physical Pin | Silk Label | SoC GPIO | Alternate Functions / Characteristics | Connected Peripheral | Signal Direction / Type | Current Usage Notes |
+|:---|:---|:---|:---|:---|:---|:---|
+| **Left 1** | `5V` | — | 5V Power Input / USB VBUS | 5V Power Rail | Power | Direct from USB-C port |
+| **Left 2** | `GND` | — | Ground | Common Ground | Power Ground | System ground return |
+| **Left 3** | `3V3` | — | 3.3V Regulated Output (800mA max) | 3.3V Power Rail | Power | Supplies SSD1306, DHT22, PIR, MAX4466 |
+| **Left 4** | `0` | GPIO 0 | LP_GPIO0, ADC1_CH0 | SSD1306 OLED Display (SDA) | Bidirectional (I2C) | I2C0 SDA (400 kHz) |
+| **Left 5** | `1` | GPIO 1 | LP_GPIO1, ADC1_CH1 | SSD1306 OLED Display (SCL) | Output (I2C) | I2C0 SCL (400 kHz) |
+| **Left 6** | `2` | GPIO 2 | LP_GPIO2, ADC1_CH2 | DHT22 Temperature & Humidity | Bidirectional (1-Wire) | Configured with internal pull-up |
+| **Left 7** | `3` | GPIO 3 | LP_GPIO3, ADC1_CH3 | User Button A (Primary) | Input (Digital) | Active-LOW, internal pull-up (Mode/Sleep toggle) |
+| **Left 8** | `4` | GPIO 4 | LP_GPIO4, ADC1_CH4, MTMS | AM312 PIR Motion Sensor | Input (Digital) | Active-HIGH motion pulse output |
+| **Left 9** | `5` | GPIO 5 | LP_GPIO5, ADC1_CH5, MTDI | MAX4466 Electret Microphone | Input (Analog ADC) | **Analog OUT**. Only free ADC pin on the header |
+| **Right 1** | `TX` | GPIO 16 | U0TXD | UART0 TX | Output (UART) | Serial console / programming debug |
+| **Right 2** | `RX` | GPIO 17 | U0RXD | UART0 RX | Input (UART) | Serial console / programming debug |
+| **Right 3** | `14` | GPIO 14 | Digital GPIO | Available GPIO | — | Available digital I/O |
+| **Right 4** | `15` | GPIO 15 | Digital GPIO | Available GPIO | — | Available digital I/O |
+| **Right 5** | `18` | GPIO 18 | SDIO_CMD / Digital GPIO | Available GPIO | — | Available digital I/O |
+| **Right 6** | `19` | GPIO 19 | SDIO_CLK / Digital GPIO | Available GPIO | — | Available digital I/O |
+| **Right 7** | `20` | GPIO 20 | SDIO_DATA0 / Digital GPIO | Available GPIO | — | Available digital I/O |
+| **Right 8** | `21` | GPIO 21 | SDIO_DATA1 / Digital GPIO | Available GPIO | — | Available digital I/O |
+| **Right 9** | `22` | GPIO 22 | SDIO_DATA2 / Digital GPIO | Settings / Secondary Button | Input (Digital) | Active-LOW, internal pull-up |
+| **Onboard** | — | GPIO 8 | Strapping pin, WS2812 DIN | Onboard WS2812 RGB LED | Output | Driven via `neopixel.NeoPixel(Pin(8), 1)` |
+| **Onboard** | `BOOT` | GPIO 9 | Strapping pin, Boot Mode | BOOT Push Button | Input | Pulls GPIO 9 to GND when pressed |
+| **Onboard** | `RESET`| — | CHIP_PU Reset | RESET Push Button | Input | Pulls CHIP_PU to GND to hardware reset |
+
+> [!IMPORTANT]
+> **ADC Pin Constraint on ESP32-C6**: The ESP32-C6 ADC1 channels exist strictly on **GPIO 0 through GPIO 6**. GPIO 14 through GPIO 22 on the right header are strictly digital GPIOs. Since GPIO 0–4 are used by the OLED, DHT22, Button A, and PIR sensor, **GPIO 5 (`ADC1_CH5`) is the only exposed analog input pin** available for the MAX4466 microphone.
 
 ## Requirements
 
 ### Requirement: ESP32-C6-Zero Hardware Peripherals Interfacing
-The system SHALL initialize and interface with the hardware peripherals of the Waveshare ESP32-C6-Zero board, including the SSD1306 I2C OLED display on GPIO 0 (SDA) and GPIO 1 (SCL), the DHT22 sensor on GPIO 2, the user push button on GPIO 3, and the onboard WS2812 RGB LED on GPIO 8.
+The system SHALL initialize and interface with the hardware peripherals of the Waveshare ESP32-C6-Zero board, including:
+- SSD1306 I2C OLED display on GPIO 0 (SDA) and GPIO 1 (SCL)
+- DHT22 temperature and humidity sensor on GPIO 2
+- Primary user push button on GPIO 3 (active-LOW, pull-up)
+- AM312 PIR motion sensor on GPIO 4 (active-HIGH)
+- MAX4466 electret microphone analog output on GPIO 5 (`ADC1_CH5`)
+- Secondary settings push button on GPIO 22 (active-LOW, pull-up)
+- Onboard WS2812 RGB LED on GPIO 8
 
 #### Scenario: Board startup initialization
 - **WHEN** the ESP32-C6-Zero board powers on or resets
-- **THEN** the system SHALL initialize GPIO pins, configure the onboard RGB LED on GPIO 8, initialize the SSD1306 I2C display driver on GPIO 0/1, configure the push button input on GPIO 3 with internal pull-up, and register the connected DHT22 sensor module on GPIO 2
+- **THEN** the system SHALL initialize GPIO pins, configure the onboard RGB LED on GPIO 8, initialize the SSD1306 I2C display driver on GPIO 0/1, configure the primary push button on GPIO 3 with internal pull-up, configure the secondary settings button on GPIO 22 with internal pull-up, configure the PIR motion input on GPIO 4, initialize the ADC channel on GPIO 5 for MAX4466 audio sampling, and register the connected DHT22 sensor module on GPIO 2
 
 #### Scenario: Onboard RGB LED status signaling
 - **WHEN** network connectivity changes (connecting to WiFi, connected to mesh, or experiencing errors)
 - **THEN** the system SHALL drive the onboard RGB LED on GPIO 8 using RGB byte order (`ORDER = (0, 1, 2, 3)`) to match the Waveshare ESP32-C6-Zero hardware channel mapping, log each status transition to the console, and indicate status via configured colors (dim blue during WiFi connection, solid green when mesh ready, dim amber on message alert, and dim red on error)
 
+### Requirement: MAX4466 Microphone Analog Interface on GP5
+The system SHALL sample the analog output of the MAX4466 electret microphone amplifier on GPIO 5 (`ADC1_CH5`) to measure sound pressure / ambient noise levels.
+
+#### Scenario: Audio sampling configuration
+- **WHEN** audio telemetry is enabled on the ESP32-C6
+- **THEN** the system SHALL configure GPIO 5 as an ADC input using `machine.ADC(Pin(5))` with 12-bit resolution (0–4095) and full-scale attenuation (11dB / 3.3V range)
+
+#### Scenario: Peak-to-peak sound level calculation
+- **WHEN** a noise sample window executes
+- **THEN** the driver SHALL sample GPIO 5 continuously over a sampling window (e.g., 50 ms), compute the peak-to-peak amplitude (`V_max - V_min`), and translate the value into relative sound pressure / decibel proxy telemetry
+
 ### Requirement: ESP32-C6-Zero Button Interaction
-The system SHALL detect short-press and long-press inputs on the user button to control screen power and display modes.
+The system SHALL detect short-press and long-press inputs on the user button (GPIO 3) to control screen power and display modes.
 
 #### Scenario: Button short press cycles display mode
 - **WHEN** the user presses and releases the button in under 1000 ms
@@ -27,6 +119,7 @@ The system SHALL detect short-press and long-press inputs on the user button to 
 #### Scenario: Button long press toggles display power
 - **WHEN** the user presses and holds the button for 1000 ms or more
 - **THEN** the system SHALL toggle the OLED display power state on or off without altering network or sensing operations
+
 
 ### Requirement: IoTMesh CoAP and HTTP Service Advertising
 The system SHALL run CoAP and HTTP servers advertising node capabilities and serving sensor telemetry under the standard IoTMesh schema.
@@ -37,7 +130,7 @@ The system SHALL run CoAP and HTTP servers advertising node capabilities and ser
 
 #### Scenario: Telemetry query via CoAP /sensors
 - **WHEN** a CoAP `GET /sensors` request is received
-- **THEN** the system SHALL return a SenML-formatted payload containing temperature and humidity metrics with measurement units and timestamps
+- **THEN** the system SHALL return a SenML-formatted payload containing temperature, humidity, motion, and audio metrics with measurement units and timestamps
 
 ### Requirement: Clean Entrypoint and Modular Service Orchestration
 The system entrypoint `main.py` SHALL serve strictly as a lean orchestrator (~50 lines) that initializes shared state and peripherals, registering sensors and delegating concurrent asynchronous lifecycle loops to modular service runners without inlining business logic.
@@ -71,3 +164,4 @@ The DHT22 sensor driver SHALL configure GPIO 2 with an internal pull-up (`Pin.IN
 #### Scenario: Persistent hardware fault handling
 - **WHEN** both the initial read attempt and the 100 ms retry fail
 - **THEN** the driver SHALL increment its read error counter, log the error message, and preserve previously cached valid readings in `AppState`
+

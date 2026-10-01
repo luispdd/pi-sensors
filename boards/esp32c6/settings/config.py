@@ -43,13 +43,18 @@ WIFI_RETRY_INTERVAL_S = 10
 # Left Pin 6 (GPIO 2) -> DHT22 DATA
 # Left Pin 7 (GPIO 3) -> Button Pin A (active-LOW, PULL_UP)
 # Left Pin 8 (GPIO 4) -> AM312 PIR Motion Sensor (active HIGH)
+# Left Pin 9 (GPIO 5) -> MAX4466 Microphone Analog OUT (ADC1_CH5)
+# Right Pin 9 (GPIO 22) -> Settings Button (active-LOW, PULL_UP)
 # Onboard   (GPIO 8) -> Onboard WS2812 RGB LED (NeoPixel)
 PIN_I2C_SDA = 0         # GPIO 0 - I2C SDA
 PIN_I2C_SCL = 1         # GPIO 1 - I2C SCL
 PIN_DHT22 = 2           # GPIO 2 - DHT22 Data line
 PIN_BUTTON = 3          # GPIO 3 - User/Mode Button (active LOW, internal pull-up)
 PIN_PIR = 4             # GPIO 4 - AM312 PIR Motion Sensor (active HIGH)
+PIN_MIC_ADC = 5         # GPIO 5 - MAX4466 Microphone Analog OUT (ADC1_CH5)
+PIN_BUTTON_SETTINGS = 22 # GPIO 22 - Settings Button (active LOW, internal pull-up)
 PIN_RGB_LED = 8         # GPIO 8 - Onboard WS2812 RGB LED (NeoPixel)
+
 
 # I2C & SSD1306 OLED Display Settings
 I2C_ID = 0
