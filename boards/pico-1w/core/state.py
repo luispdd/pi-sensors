@@ -6,6 +6,7 @@ from settings import config
 MODE_SENSOR_DISPLAY = 0
 MODE_SEMI_SLEEP = 1
 MODE_MESSAGE = 2
+MODE_DETAILS = 3
 
 
 class AppState:
@@ -26,6 +27,7 @@ class AppState:
 
         # Operational modes & alerts
         self.mode = MODE_SENSOR_DISPLAY
+        self._previous_mode = MODE_SENSOR_DISPLAY
         self.pending_message = None
         self.alert_message = ""
         self.display_override_text = None
@@ -54,22 +56,33 @@ class AppState:
                     "unit": unit,
                     "ts": None,
                     "errors": 0,
+                    "min": None,
+                    "max": None,
                 }
         print(f"[state] Registered sensor '{getattr(sensor_driver, 'name', 'unknown')}' with metrics: {[m['key'] for m in metrics]}")
 
     def update_metric(self, key, val, timestamp=None):
-        """Updates stored metric value and timestamp."""
+        """Updates stored metric value, timestamp, and boot-scoped min/max."""
         if key in self._metrics:
             self._metrics[key]["val"] = val
             if timestamp is not None:
                 self._metrics[key]["ts"] = timestamp
                 self.timestamp = timestamp
+            if val is not None:
+                cur_min = self._metrics[key].get("min")
+                cur_max = self._metrics[key].get("max")
+                if cur_min is None or val < cur_min:
+                    self._metrics[key]["min"] = val
+                if cur_max is None or val > cur_max:
+                    self._metrics[key]["max"] = val
         else:
             self._metrics[key] = {
                 "val": val,
                 "unit": "",
                 "ts": timestamp,
                 "errors": 0,
+                "min": val,
+                "max": val,
             }
 
     def get_metric(self, key):
@@ -166,12 +179,29 @@ class AppState:
 
     def enter_semi_sleep(self):
         """Transitions state to semi-sleep mode (display off, periodic polling suspended)."""
+        self._previous_mode = self.mode
         self.mode = MODE_SEMI_SLEEP
         self.alert_message = ""
         self.display_override_text = None
 
+    def enter_details_mode(self):
+        """Transitions state to details mode, clearing any alerts."""
+        self.mode = MODE_DETAILS
+        self.alert_message = ""
+        self.display_override_text = None
+        self.pending_message = None
+
+    def restore_previous_mode(self):
+        """Restores the mode saved before SEMI_SLEEP or MESSAGE_MODE entry."""
+        self.mode = self._previous_mode
+        self._previous_mode = MODE_SENSOR_DISPLAY
+        self.alert_message = ""
+        self.display_override_text = None
+        self.pending_message = None
+
     def enter_message_mode(self, text, caller=None):
         """Transitions state to message display mode."""
+        self._previous_mode = self.mode
         self.mode = MODE_MESSAGE
         self.alert_message = text
         self.display_override_text = text
