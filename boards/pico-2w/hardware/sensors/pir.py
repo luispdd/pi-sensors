@@ -19,12 +19,14 @@ class PIRSensor:
     def __init__(
         self,
         pin=getattr(config, "PIN_PIR", 12),
-        window_s=getattr(config, "PIR_WINDOW_S", 300),
+        window_s=getattr(config, "PIR_WINDOW_S", 10),
         sample_interval_s=1.0,
+        app_state=None,
     ):
         self.pin_num = pin
         self.window_s = int(window_s)
         self.sample_interval_s = sample_interval_s
+        self.app_state = app_state
         self.name = "pir"
         self.metrics = [
             {"key": "motion", "unit": "%"},
@@ -38,6 +40,10 @@ class PIRSensor:
         self._active_count = 0
         self._samples_recorded = 0
         self.last_motion = 0.0
+
+        # Decoupled period accumulator for data logging
+        self._period_active_ticks = 0
+        self._period_total_ticks = 0
 
         self.init()
 
@@ -70,9 +76,32 @@ class PIRSensor:
         if self._samples_recorded < self.window_s:
             self._samples_recorded += 1
 
-        total = self._samples_recorded if self._samples_recorded > 0 else 1
-        self.last_motion = round((self._active_count / total) * 100.0, 1)
+        # Period accumulator update for persistent logging
+        self._period_total_ticks += 1
+        if val:
+            self._period_active_ticks += 1
+
+        divisor = self.window_s if self.window_s > 0 else 10
+        self.last_motion = round((self._active_count / divisor) * 100.0, 1)
+
+        if self.app_state is not None:
+            try:
+                self.app_state.update_metric("motion", self.last_motion)
+            except Exception:
+                pass
+
         return self.last_motion
+
+    def get_period_motion(self, reset=True):
+        """Returns the period duty cycle percentage and optionally resets the accumulator."""
+        if self._period_total_ticks > 0:
+            val = round((self._period_active_ticks / self._period_total_ticks) * 100.0, 1)
+        else:
+            val = self.last_motion
+        if reset:
+            self._period_active_ticks = 0
+            self._period_total_ticks = 0
+        return val
 
     def read(self):
         """Duck-typed read method returning metric dictionary."""
@@ -90,8 +119,14 @@ class PIRSensor:
 
 def create_sensor(
     pin=getattr(config, "PIN_PIR", 12),
-    window_s=getattr(config, "PIR_WINDOW_S", 300),
+    window_s=getattr(config, "PIR_WINDOW_S", 10),
     sample_interval_s=1.0,
+    app_state=None,
 ):
     """Factory function for instantiating the PIR sensor."""
-    return PIRSensor(pin=pin, window_s=window_s, sample_interval_s=sample_interval_s)
+    return PIRSensor(
+        pin=pin,
+        window_s=window_s,
+        sample_interval_s=sample_interval_s,
+        app_state=app_state,
+    )

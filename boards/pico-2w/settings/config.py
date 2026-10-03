@@ -79,7 +79,7 @@ SENSOR_READ_INTERVAL_S = 2.0       # DHT22 requires >= 1-2s between readings
 DISPLAY_REFRESH_INTERVAL_S = 1.0
 SENSOR_LOG_INTERVAL_S = 300        # Periodic logging sample interval (5 minutes)
 LOG_FLUSH_INTERVAL_S = 3600        # SD card auto-flush interval (1 hour)
-PIR_WINDOW_S = 300                 # Motion sensor duty cycle rolling window (5 minutes)
+PIR_WINDOW_S = 10                  # Motion sensor duty cycle rolling window (10 seconds)
 
 # Data Logger Storage Configuration
 LOG_SD_ROOT = "/sensor-data"

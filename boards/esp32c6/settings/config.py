@@ -67,7 +67,7 @@ DISPLAY_HEIGHT = OLED_HEIGHT
 # Timing & Intervals (in seconds)
 SENSOR_READ_INTERVAL_S = 2.5       # DHT22 requires >= 2s between readings
 DISPLAY_REFRESH_INTERVAL_S = 1.0   # UI update interval
-PIR_WINDOW_S = 300                 # Motion sensor duty cycle rolling window (5 minutes)
+PIR_WINDOW_S = 10                  # Motion sensor duty cycle rolling window (10 seconds)
 
 # HTTP & CoAP Server Configuration
 HTTP_PORT = 80

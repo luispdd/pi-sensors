@@ -77,6 +77,7 @@ class UIController:
                     config.OLED_HEIGHT,
                     self.i2c,
                 )
+                self.oled.contrast(10)
                 self.oled.fill(0)
                 self.oled.show()
                 self.display_on = True

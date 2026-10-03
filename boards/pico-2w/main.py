@@ -30,7 +30,7 @@ async def main():
     ui.show_splash("Pico 2W Station", "Initializing...")
 
     # Register modular sensors
-    pir_sensor = create_pir(pin=getattr(config, "PIN_PIR", 12), window_s=getattr(config, "PIR_WINDOW_S", 300))
+    pir_sensor = create_pir(pin=getattr(config, "PIN_PIR", 12), window_s=getattr(config, "PIR_WINDOW_S", 10), app_state=app_state)
     mic_sensor = create_mic(pin=getattr(config, "PIN_MIC_ADC", 27), app_state=app_state)
     app_state.register_sensor(create_dht22(pin=config.PIN_DHT22))
     app_state.register_sensor(create_light(pin=getattr(config, "PIN_LIGHT_ADC", 26), light_scale=getattr(config, "LIGHT_SCALE_FACTOR", 4.0)))

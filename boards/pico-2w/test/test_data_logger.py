@@ -167,6 +167,50 @@ class TestDataLogger(unittest.TestCase):
         flushed_rows, _ = self.sd_storage.flushed_batches[0]
         self.assertEqual(flushed_rows[0]["motion"], 15.0)
 
+    def test_poll_and_buffer_period_motion_integration(self):
+        """Verify poll_and_buffer queries get_period_motion_and_reset and resets accumulator."""
+        from settings import config
+        from hardware.sensors.pir import PIRSensor
+        local_id = getattr(config, "DEVICE_ID", config.DEFAULT_DEVICE_ID)
+
+        # Setup registered PIR sensor with mock pin
+        pir = PIRSensor(pin=12, window_s=10, app_state=self.app_state)
+        class MockPin:
+            def __init__(self, val=0):
+                self._val = val
+            def value(self):
+                return self._val
+        mock_pin = MockPin(1)
+        pir._pin = mock_pin
+        self.app_state.register_sensor(pir)
+
+        # Accumulate 2 active samples, then 2 idle samples
+        pir.sample()
+        pir.sample()
+        mock_pin._val = 0
+        pir.sample()
+        pir.sample()
+        # Total ticks: 4, active ticks: 2 -> period motion is 50.0%
+        # While rolling 10-s window is (2/10)*100 = 20.0%
+        self.assertEqual(pir.last_motion, 20.0)
+
+        self.app_state.log_active_nodes = {"127.0.0.1": local_id}
+        self.app_state.ip_address = "127.0.0.1"
+        self.data_logger.start_session()
+
+        # Run poll_and_buffer
+        asyncio.run(self.data_logger.poll_and_buffer())
+
+        # Check buffered reading has the period accumulator value (50.0%), not rolling window (20.0%)
+        self.assertIn(local_id, self.app_state.log_buffers)
+        buffered_reading = self.app_state.log_buffers[local_id][0]
+        self.assertEqual(buffered_reading["motion"], 50.0)
+
+        # Verify accumulator was reset: total ticks is now 0
+        self.assertEqual(pir._period_total_ticks, 0)
+        self.assertEqual(pir._period_active_ticks, 0)
+
+
     def test_sd_storage_six_column_writing_and_sync_parsing(self):
         """Verify SDStorage writes 6 columns and read_log_records parses 4, 5, and 6 column rows."""
         import io

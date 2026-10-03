@@ -153,6 +153,20 @@ class AppState:
             senml_list.append(entry)
         return senml_list
 
+    def get_period_motion_and_reset(self):
+        """Retrieves and resets the registered PIR sensor's period accumulator.
+
+        Falls back to standard motion metric if unaccumulated or no PIR sensor is registered.
+        """
+        for sensor in self._registered_sensors:
+            if hasattr(sensor, "get_period_motion"):
+                try:
+                    return sensor.get_period_motion(reset=True)
+                except Exception as e:
+                    print(f"[state] Error querying PIR period motion: {e}")
+        return self.get_metric_val("motion")
+
+
     # --- Backwards Compatibility Properties & Methods ---
 
     @property

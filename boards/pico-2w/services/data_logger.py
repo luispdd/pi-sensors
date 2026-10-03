@@ -81,7 +81,10 @@ class DataLogger:
             temp = metrics.get("temperature", {}).get("val") if "temperature" in metrics else getattr(self.app_state, "temperature_c", None)
             hum = metrics.get("humidity", {}).get("val") if "humidity" in metrics else getattr(self.app_state, "humidity_pct", None)
             light = metrics.get("light", {}).get("val") if "light" in metrics else getattr(self.app_state, "light_pct", None)
-            motion = metrics.get("motion", {}).get("val") if "motion" in metrics else getattr(self.app_state, "motion_pct", None)
+            if hasattr(self.app_state, "get_period_motion_and_reset"):
+                motion = self.app_state.get_period_motion_and_reset()
+            else:
+                motion = metrics.get("motion", {}).get("val") if "motion" in metrics else getattr(self.app_state, "motion_pct", None)
             local_ts = getattr(self.app_state, "timestamp", None) or ts
             self.app_state.buffer_reading(local_id, local_ts, temp, hum, light, motion)
 

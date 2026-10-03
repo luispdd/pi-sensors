@@ -1,10 +1,4 @@
-# AM312 PIR Sensor Specification
-
-## Purpose
-
-Enables passive infrared (PIR) motion sensing using the AM312 sensor, computing an active duty cycle percentage over a 300-second rolling window and exporting standard SenML telemetry across CoAP and HTTP.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: AM312 GPIO motion signal sampling
 The firmware SHALL monitor the digital output pin of an AM312 PIR motion sensor at an interval of 1.0 second using a non-blocking asynchronous coroutine. On Raspberry Pi Pico 2 W (RP2350), the input pin SHALL be configured with an internal pull-down resistor (`Pin.PULL_DOWN`) to prevent unconfigured pad pull-up defaults from floating HIGH. On Waveshare ESP32-C6, the input pin SHALL be configured as a high-impedance digital input without an internal pull-down resistor (`Pin.IN`) to prevent voltage divider attenuation on the AM312 active CMOS output stage.
@@ -43,14 +37,3 @@ The sensor driver SHALL maintain a fixed-capacity 10-sample circular buffer repr
 #### Scenario: Periodic logging accumulator
 - **WHEN** the periodic data logger queries the PIR sensor for 5-minute SD card persistence
 - **THEN** the sensor driver SHALL return the average duty cycle percentage across the entire logging period `(period_active_ticks / period_total_ticks) * 100.0` and reset the period accumulator counters for the next logging interval
-
-### Requirement: Modular sensor duck-typed interface and SenML export
-The AM312 sensor driver SHALL adhere to the modular sensor protocol by exposing `name = "pir"`, `metrics = [{"key": "motion", "unit": "%"}]`, an `init()` method, and a `read()` method returning a dictionary `{"motion": <pct>}`. When registered with `AppState`, the metric SHALL be automatically formatted as SenML `{"n": "motion", "u": "%", "v": <pct>}` on `/sensors` endpoints.
-
-#### Scenario: Reading sensor metric via AppState
-- **WHEN** `AppState.read_registered_sensors()` or an HTTP/CoAP request queries `/sensors`
-- **THEN** the system SHALL return the latest computed motion percentage under metric key `"motion"` with unit `"%"`
-
-#### Scenario: Display exclusion
-- **WHEN** the UI controllers render the active sensor display screens on the local OLED or TFT display
-- **THEN** the motion metric SHALL NOT be rendered on the local physical display screen

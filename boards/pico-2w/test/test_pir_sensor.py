@@ -24,68 +24,89 @@ class MockPin:
         self._value = val
 
 
+class MockAppState:
+    def __init__(self):
+        self.updates = []
+
+    def update_metric(self, key, value):
+        self.updates.append((key, value))
+
+
 class TestPIRSensorPico2W(unittest.TestCase):
     def test_initialization_and_duck_typing(self):
-        sensor = PIRSensor(pin=12, window_s=300)
+        sensor = PIRSensor(pin=12)
         self.assertEqual(sensor.name, "pir")
         self.assertEqual(sensor.metrics, [{"key": "motion", "unit": "%"}])
-        self.assertEqual(sensor.window_s, 300)
-        self.assertEqual(len(sensor._buffer), 300)
+        self.assertEqual(sensor.window_s, 10)
+        self.assertEqual(len(sensor._buffer), 10)
         self.assertEqual(sensor.last_motion, 0.0)
 
         res = sensor.read()
         self.assertEqual(res, {"motion": 0.0})
 
-    def test_duty_cycle_warmup_and_calculation(self):
+    def test_ramp_up_and_decay(self):
         sensor = PIRSensor(pin=12, window_s=10)
         mock_pin = MockPin(0)
         sensor._pin = mock_pin
 
-        # First sample: 0 -> 0.0%
+        # Idle sample: 0 -> 0.0%
         sensor.sample()
         self.assertEqual(sensor.last_motion, 0.0)
 
-        # 5 active samples
+        # 5 active samples -> exactly 50.0%
         mock_pin.set_value(1)
         for _ in range(5):
             sensor.sample()
-
-        # Total 6 samples, 5 active -> (5/6)*100 = 83.3%
-        self.assertEqual(sensor.last_motion, 83.3)
-
-        # 4 idle samples to complete 10-sample window
-        mock_pin.set_value(0)
-        for _ in range(4):
-            sensor.sample()
-
-        # 10 samples total, 5 active -> 50.0%
         self.assertEqual(sensor.last_motion, 50.0)
-        self.assertEqual(sensor.read(), {"motion": 50.0})
 
-    def test_rolling_window_eviction(self):
-        # 300-second window
-        sensor = PIRSensor(pin=12, window_s=300)
+        # 5 more active samples -> 100.0%
+        for _ in range(5):
+            sensor.sample()
+        self.assertEqual(sensor.last_motion, 100.0)
+        self.assertEqual(sensor.read(), {"motion": 100.0})
+
+        # 10 idle samples -> decay completely back to 0.0%
+        mock_pin.set_value(0)
+        for _ in range(10):
+            sensor.sample()
+        self.assertEqual(sensor.last_motion, 0.0)
+
+    def test_app_state_immediate_push(self):
+        mock_state = MockAppState()
+        sensor = PIRSensor(pin=12, window_s=10, app_state=mock_state)
         mock_pin = MockPin(1)
         sensor._pin = mock_pin
 
-        # Record 45 active samples
-        for _ in range(45):
+        sensor.sample()
+        self.assertEqual(len(mock_state.updates), 1)
+        self.assertEqual(mock_state.updates[0], ("motion", 10.0))
+
+        sensor.sample()
+        self.assertEqual(len(mock_state.updates), 2)
+        self.assertEqual(mock_state.updates[1], ("motion", 20.0))
+
+    def test_period_logging_accumulator(self):
+        sensor = PIRSensor(pin=12, window_s=10)
+        mock_pin = MockPin(1)
+        sensor._pin = mock_pin
+
+        # 3 active samples
+        for _ in range(3):
             sensor.sample()
 
-        # Record 255 idle samples to fill 300s window
+        # 7 idle samples
         mock_pin.set_value(0)
-        for _ in range(255):
+        for _ in range(7):
             sensor.sample()
 
-        # 45 of 300 -> 15.0%
-        self.assertEqual(sensor.last_motion, 15.0)
+        # Total 10 ticks, 3 active -> 30.0%
+        val = sensor.get_period_motion(reset=True)
+        self.assertEqual(val, 30.0)
 
-        # Record 45 more idle samples -> the 45 oldest active samples get evicted!
-        for _ in range(45):
-            sensor.sample()
-
-        # All 300 slots in buffer are now 0 -> 0.0%
-        self.assertEqual(sensor.last_motion, 0.0)
+        # After reset, accumulator is empty; query returns last_motion (0.0% because last sample was idle)
+        self.assertEqual(sensor._period_total_ticks, 0)
+        self.assertEqual(sensor._period_active_ticks, 0)
+        self.assertEqual(sensor.get_period_motion(reset=False), sensor.last_motion)
 
     def test_pin_failure_handling(self):
         sensor = PIRSensor(pin=12, window_s=10)
@@ -96,9 +117,39 @@ class TestPIRSensorPico2W(unittest.TestCase):
         self.assertEqual(sensor.last_motion, 0.0)
 
     def test_factory_function(self):
-        sensor = create_sensor(pin=12, window_s=60)
+        mock_state = MockAppState()
+        sensor = create_sensor(pin=12, window_s=10, app_state=mock_state)
         self.assertIsInstance(sensor, PIRSensor)
-        self.assertEqual(sensor.window_s, 60)
+        self.assertEqual(sensor.window_s, 10)
+        self.assertIs(sensor.app_state, mock_state)
+
+    def test_app_state_get_period_motion_and_reset(self):
+        from core.state import AppState
+        state = AppState()
+        # Fallback when no PIR registered and no motion metric
+        self.assertIsNone(state.get_period_motion_and_reset())
+
+        # Fallback when metric has value but no registered sensor with accumulator
+        state.update_metric("motion", 42.0)
+        self.assertEqual(state.get_period_motion_and_reset(), 42.0)
+
+        # Registered PIR sensor with accumulator
+        sensor = PIRSensor(pin=12, window_s=10, app_state=state)
+        mock_pin = MockPin(1)
+        sensor._pin = mock_pin
+        state.register_sensor(sensor)
+
+        sensor.sample()  # 1 active tick
+        sensor.sample()  # 2 active ticks
+        mock_pin.set_value(0)
+        sensor.sample()  # 1 idle tick -> total 3 ticks, 2 active -> 66.7%
+
+        val = state.get_period_motion_and_reset()
+        self.assertEqual(val, 66.7)
+
+        # Subsequent call returns fallback last_motion (which is 20.0% for 2 active out of 10)
+        val2 = state.get_period_motion_and_reset()
+        self.assertEqual(val2, 20.0)
 
 
 if __name__ == "__main__":
