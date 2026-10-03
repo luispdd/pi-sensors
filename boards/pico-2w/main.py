@@ -5,6 +5,7 @@ from core.state import AppState
 from hardware.sensors.dht22 import create_sensor as create_dht22
 from hardware.sensors.light import create_sensor as create_light
 from hardware.sensors.pir import create_sensor as create_pir
+from hardware.sensors.mic import create_sensor as create_mic
 from hardware.ui import UIController
 from hardware.sd_storage import SDStorage
 from services.network_manager import NetworkManager, run_network_task
@@ -30,9 +31,11 @@ async def main():
 
     # Register modular sensors
     pir_sensor = create_pir(pin=getattr(config, "PIN_PIR", 12), window_s=getattr(config, "PIR_WINDOW_S", 300))
+    mic_sensor = create_mic(pin=getattr(config, "PIN_MIC_ADC", 27), app_state=app_state)
     app_state.register_sensor(create_dht22(pin=config.PIN_DHT22))
     app_state.register_sensor(create_light(pin=getattr(config, "PIN_LIGHT_ADC", 26), light_scale=getattr(config, "LIGHT_SCALE_FACTOR", 4.0)))
     app_state.register_sensor(pir_sensor)
+    app_state.register_sensor(mic_sensor)
     app_state.read_registered_sensors()
 
     # SD Storage and CoAP Server for DataLogger
@@ -46,6 +49,7 @@ async def main():
     await asyncio.gather(
         run_sensor_task(app_state),
         pir_sensor.run_sampling_task(),
+        mic_sensor.run_sampling_task(),
         ui.run_display_task(app_state),
         ui.run_button_task(app_state, data_logger=data_logger, sd_storage=sd_storage),
         run_network_task(app_state, net_mgr),

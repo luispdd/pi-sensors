@@ -214,7 +214,6 @@ class UIController:
         "light": "L",
         "motion": "M",
         "noise": "N",
-        "sound": "N",
     }
 
     def render_details_view(self, app_state):
@@ -228,15 +227,15 @@ class UIController:
 
             metrics = app_state.get_all_metrics() if hasattr(app_state, "get_all_metrics") else {}
             # Ordered display: temperature first, humidity second, then any additional registered metric
-            known_order = ["temperature", "humidity"]
+            known_order = ["temperature", "humidity", "motion", "noise"]
             keys_to_show = [k for k in known_order if k in metrics]
             for k in metrics:
                 if k not in keys_to_show:
                     keys_to_show.append(k)
 
-            # Up to 3 metric rows: y=12, 24, 36 (fits within 64px display)
+            # Up to 4 metric rows: y=12, 24, 36, 48 (fits within 64px display)
             y = 12
-            for key in keys_to_show[:3]:
+            for key in keys_to_show[:4]:
                 label = self.METRIC_LABELS.get(key, key[:1].upper())
                 m = metrics.get(key, {})
                 cur = m.get("val")

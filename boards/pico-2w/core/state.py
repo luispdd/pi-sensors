@@ -60,6 +60,8 @@ class AppState:
         """Registers a duck-typed sensor driver into the application state."""
         if sensor_driver not in self._registered_sensors:
             self._registered_sensors.append(sensor_driver)
+        if hasattr(sensor_driver, "app_state") and getattr(sensor_driver, "app_state", None) is None:
+            sensor_driver.app_state = self
 
         metrics = getattr(sensor_driver, "metrics", [])
         for m in metrics:
@@ -193,6 +195,14 @@ class AppState:
     def pir_activity(self, val):
         self.update_metric("motion", val)
 
+    @property
+    def noise_pct(self):
+        return self.get_metric_val("noise")
+
+    @noise_pct.setter
+    def noise_pct(self, val):
+        self.update_metric("noise", val)
+
     def update_sensors(self, sensor_data):
         """Updates internal telemetry from a legacy sensors dict."""
         if "temperature_c" in sensor_data and sensor_data["temperature_c"] is not None:
@@ -203,6 +213,10 @@ class AppState:
             self.update_metric("light", sensor_data["light_pct"])
         if "motion_pct" in sensor_data and sensor_data["motion_pct"] is not None:
             self.update_metric("motion", sensor_data["motion_pct"])
+        if "noise_pct" in sensor_data and sensor_data["noise_pct"] is not None:
+            self.update_metric("noise", sensor_data["noise_pct"])
+        if "noise" in sensor_data and sensor_data["noise"] is not None:
+            self.update_metric("noise", sensor_data["noise"])
         if "read_errors" in sensor_data:
             self.read_errors = sensor_data["read_errors"]
         if "timestamp" in sensor_data and sensor_data["timestamp"] is not None:

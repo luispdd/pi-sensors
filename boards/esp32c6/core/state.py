@@ -44,6 +44,8 @@ class AppState:
         """Registers a duck-typed sensor driver into the application state."""
         if sensor_driver not in self._registered_sensors:
             self._registered_sensors.append(sensor_driver)
+        if hasattr(sensor_driver, "app_state") and getattr(sensor_driver, "app_state", None) is None:
+            sensor_driver.app_state = self
 
         # Inspect metrics exposed by sensor
         metrics = getattr(sensor_driver, "metrics", [])

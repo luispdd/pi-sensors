@@ -95,12 +95,14 @@ class UIController:
         h_val = get_val("humidity") if get_val else getattr(app_state, "humidity_pct", None)
         l_val = get_val("light") if get_val else getattr(app_state, "light_pct", None)
         p_val = get_val("motion") if get_val else getattr(app_state, "motion_pct", None)
+        n_val = get_val("noise") if get_val else getattr(app_state, "noise_pct", None)
 
         self.display.render_status(
             temp=t_val,
             hum=h_val,
             light=l_val,
             pir=p_val,
+            noise=n_val,
             ip=getattr(app_state, "ip_address", None),
             wifi_status=getattr(app_state, "wifi_status", "disconnected"),
             requests_served=getattr(app_state, "requests_served", 0),

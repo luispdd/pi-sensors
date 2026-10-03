@@ -228,6 +228,7 @@ class TFTDisplay:
         hum=None,
         light=None,
         pir=None,
+        noise=None,
         ip=None,
         wifi_status="connected",
         requests_served=0,
@@ -260,9 +261,11 @@ class TFTDisplay:
             line0 = f"T:{t_str} H:{h_str} L:{l_str}"
             self.tft.text((5, 8), line0, TFT.GREEN, sysfont, 1)
 
-            # PIR Activity Line at y=22
+            # PIR and Noise Combined Line at y=22
             pir_str = f"{pir:.0f}%" if pir is not None else "--"
-            self.tft.text((5, 22), f"PIR: {pir_str}", TFT.GREEN, sysfont, 1)
+            noise_str = f"{noise:.0f}%" if noise is not None else "--"
+            combined_line = f"PIR:{pir_str} N:{noise_str}"
+            self.tft.text((5, 22), combined_line[:self.MAX_LINE_LEN], TFT.GREEN, sysfont, 1)
 
             # Network Status (shifted down by 14px: y=36, y=50)
             if config_error or wifi_status == "config_error":
@@ -358,6 +361,7 @@ class TFTDisplay:
             hum=app_state.humidity_pct,
             light=getattr(app_state, "light_pct", None),
             pir=getattr(app_state, "motion_pct", getattr(app_state, "pir_activity", None)),
+            noise=app_state.get_metric_val("noise") if hasattr(app_state, "get_metric_val") else getattr(app_state, "noise", None),
             ip=app_state.ip_address,
             wifi_status=app_state.wifi_status,
             requests_served=app_state.requests_served,
@@ -377,6 +381,7 @@ class TFTDisplay:
         hum=None,
         light=None,
         pir=None,
+        noise=None,
         ip=None,
         wifi_status="connected",
         requests_served=0,
@@ -395,6 +400,7 @@ class TFTDisplay:
                 hum=hum,
                 light=light,
                 pir=pir,
+                noise=noise,
                 ip=ip,
                 wifi_status=wifi_status,
                 requests_served=requests_served,
