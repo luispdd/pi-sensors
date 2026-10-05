@@ -61,13 +61,39 @@ class AppState:
                 }
         print(f"[state] Registered sensor '{getattr(sensor_driver, 'name', 'unknown')}' with metrics: {[m['key'] for m in metrics]}")
 
+    def set_time(self, epoch_seconds=None, synced=True):
+        """Sets/anchors the internal timestamp baseline."""
+        if epoch_seconds is None:
+            try:
+                epoch_seconds = time.time()
+            except Exception:
+                epoch_seconds = None
+        self._current_epoch = epoch_seconds
+        if epoch_seconds is not None:
+            from services.ntp_service import format_iso_timestamp
+            self.timestamp = format_iso_timestamp(self._current_epoch)
+        if synced:
+            self.ntp_synced = True
+
+    def tick_timestamp(self, seconds=1):
+        """Advances internal timestamp by specified elapsed seconds."""
+        if self._current_epoch is None:
+            try:
+                self._current_epoch = time.time()
+            except Exception:
+                self._current_epoch = 0
+        self._current_epoch += seconds
+        from services.ntp_service import format_iso_timestamp
+        self.timestamp = format_iso_timestamp(self._current_epoch)
+
     def update_metric(self, key, val, timestamp=None):
         """Updates stored metric value, timestamp, and boot-scoped min/max."""
+        ts = timestamp if timestamp is not None else self.timestamp
         if key in self._metrics:
             self._metrics[key]["val"] = val
-            if timestamp is not None:
-                self._metrics[key]["ts"] = timestamp
-                self.timestamp = timestamp
+            if ts is not None:
+                self._metrics[key]["ts"] = ts
+                self.timestamp = ts
             if val is not None:
                 cur_min = self._metrics[key].get("min")
                 cur_max = self._metrics[key].get("max")
@@ -79,7 +105,7 @@ class AppState:
             self._metrics[key] = {
                 "val": val,
                 "unit": "",
-                "ts": timestamp,
+                "ts": ts,
                 "errors": 0,
                 "min": val,
                 "max": val,
@@ -100,6 +126,7 @@ class AppState:
 
     def read_registered_sensors(self, timestamp=None):
         """Performs a synchronous read across all registered sensor drivers."""
+        ts = timestamp if timestamp is not None else self.timestamp
         for sensor in self._registered_sensors:
             try:
                 res = sensor.read()
@@ -111,11 +138,11 @@ class AppState:
                             self._metrics[k]["errors"] += 1
                 elif isinstance(res, dict):
                     for k, v in res.items():
-                        self.update_metric(k, v, timestamp=timestamp)
+                        self.update_metric(k, v, timestamp=ts)
                 elif isinstance(res, (int, float)):
                     metrics = getattr(sensor, "metrics", [])
                     if metrics:
-                        self.update_metric(metrics[0]["key"], res, timestamp=timestamp)
+                        self.update_metric(metrics[0]["key"], res, timestamp=ts)
             except Exception as err:
                 self.read_errors += 1
                 print(f"[state] Sensor read error: {err}")

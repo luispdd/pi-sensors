@@ -6,6 +6,7 @@ import sys
 from settings import config
 from core.state import MODE_SEMI_SLEEP
 from services.ntp_service import get_utc_iso_timestamp
+from services.live_publisher import LivePublisher
 
 try:
     import socket
@@ -94,10 +95,11 @@ def extract_device_id_from_json(json_text):
 class CoapServer:
     """CoAP server dynamically serving registered telemetry resources and IoTMesh endpoints."""
 
-    def __init__(self, app_state, reader=None, port=getattr(config, "COAP_PORT", 5683)):
+    def __init__(self, app_state, reader=None, port=getattr(config, "COAP_PORT", 5683), live_publisher=None):
         self.app_state = app_state
         self.reader = reader
         self.port = port
+        self.live_publisher = live_publisher or LivePublisher(app_state)
         self.coap = microcoapy.Coap()
         self.coap.debug = False
         self.coap.responseCallback = self._handle_response
@@ -112,6 +114,8 @@ class CoapServer:
             ("info", self._handle_info),
             ("sensors", self._handle_sensors_collection),
             ("display", self._handle_display),
+            ("live/start", self._handle_live_start),
+            ("live/stop", self._handle_live_stop),
         ]
         for path, handler in base_routes:
             self.coap.addIncomingRequestCallback(path, handler)
@@ -190,6 +194,7 @@ class CoapServer:
                 parts.append(f'</sensors/{key}>;rt="{key}";if="sensor"')
 
         parts.append('</display>;rt="display";if="actuator"')
+        parts.append('</live>;rt="live-stream";if="actuator"')
         link_format = ",".join(parts)
 
         self.coap.sendResponse(
@@ -387,6 +392,85 @@ class CoapServer:
             packet.token, request_packet=packet,
         )
 
+    def _send_bad_request(self, packet, sender_ip, sender_port, msg="Bad Request"):
+        self.coap.sendResponse(
+            sender_ip,
+            sender_port,
+            packet.messageid,
+            msg,
+            COAP_RESPONSE_CODE.COAP_BAD_REQUEST,
+            COAP_CONTENT_FORMAT.COAP_TEXT_PLAIN,
+            packet.token, request_packet=packet,
+        )
+
+    def _handle_live_start(self, packet, sender_ip, sender_port):
+        if packet.method != COAP_METHOD.COAP_POST:
+            self._send_method_not_allowed(packet, sender_ip, sender_port)
+            return
+
+        self._record_caller(sender_ip)
+
+        payload_bytes = packet.payload
+        if not payload_bytes:
+            self._send_bad_request(packet, sender_ip, sender_port, "Missing body")
+            return
+
+        try:
+            if isinstance(payload_bytes, (bytes, bytearray)):
+                payload_str = payload_bytes.decode("utf-8")
+            else:
+                payload_str = str(payload_bytes)
+            data = json.loads(payload_str)
+        except Exception:
+            self._send_bad_request(packet, sender_ip, sender_port, "Malformed JSON")
+            return
+
+        if not isinstance(data, dict):
+            self._send_bad_request(packet, sender_ip, sender_port, "JSON must be object")
+            return
+
+        broker = data.get("broker")
+        rate_ms = data.get("rate_ms")
+
+        if not broker or not isinstance(broker, str) or rate_ms is None or isinstance(rate_ms, bool) or not isinstance(rate_ms, int) or rate_ms <= 0:
+            self._send_bad_request(packet, sender_ip, sender_port, "Invalid broker or rate_ms")
+            return
+
+        if hasattr(self, "live_publisher") and self.live_publisher:
+            self.live_publisher.start(broker=broker, rate_ms=rate_ms)
+
+        self.coap.sendResponse(
+            sender_ip,
+            sender_port,
+            packet.messageid,
+            None,
+            COAP_RESPONSE_CODE.COAP_CHANGED,
+            COAP_CONTENT_FORMAT.COAP_NONE,
+            packet.token,
+            request_packet=packet,
+        )
+
+    def _handle_live_stop(self, packet, sender_ip, sender_port):
+        if packet.method != COAP_METHOD.COAP_POST:
+            self._send_method_not_allowed(packet, sender_ip, sender_port)
+            return
+
+        self._record_caller(sender_ip)
+
+        if hasattr(self, "live_publisher") and self.live_publisher:
+            self.live_publisher.stop()
+
+        self.coap.sendResponse(
+            sender_ip,
+            sender_port,
+            packet.messageid,
+            None,
+            COAP_RESPONSE_CODE.COAP_CHANGED,
+            COAP_CONTENT_FORMAT.COAP_NONE,
+            packet.token,
+            request_packet=packet,
+        )
+
     def start(self):
         """Initializes and binds the UDP socket for unicast, broadcast, and CoAP multicast."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -409,18 +493,13 @@ class CoapServer:
                 pass
 
         try:
-            sock.bind(("", self.port))
-        except Exception:
             sock.bind(("0.0.0.0", self.port))
+        except Exception:
+            try:
+                sock.bind(("", self.port))
+            except Exception:
+                pass
 
-        try:
-            COAP_MULTICAST_GROUP = "224.0.1.187"
-            ip_bytes = bytes(int(x) for x in COAP_MULTICAST_GROUP.split("."))
-            mreq = struct.pack("4sL", ip_bytes, 0)
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-            print(f"[coap] Joined multicast group {COAP_MULTICAST_GROUP}")
-        except Exception as e:
-            print(f"[coap] Multicast join skipped: {e}")
         sock.setblocking(False)
         self.coap.setCustomSocket(sock)
         print(f"[coap] Server listening on UDP port {self.port}")

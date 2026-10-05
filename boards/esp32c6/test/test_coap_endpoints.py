@@ -163,6 +163,7 @@ class TestEsp32C6CoapEndpoints(unittest.TestCase):
         self.assertIn('</sensors/temperature>;rt="temperature"', link_text)
         self.assertIn('</sensors/humidity>;rt="humidity"', link_text)
         self.assertIn('</id>;rt="core.d"', link_text)
+        self.assertIn('</live>;rt="live-stream";if="actuator"', link_text)
 
     def test_method_not_allowed(self):
         """Verify invalid methods return 4.05 Method Not Allowed."""

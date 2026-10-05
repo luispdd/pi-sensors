@@ -88,10 +88,12 @@ class PollerService:
         db_path: Optional[Path] = None,
         coap_client: Optional[CoapClient] = None,
         poll_interval: Optional[int] = None,
+        on_reading_inserted: Optional[Any] = None,
     ):
         self.db_path = db_path or config.DB_PATH
         self.coap_client = coap_client or CoapClient()
         self.poll_interval = poll_interval or config.POLL_INTERVAL_S
+        self.on_reading_inserted = on_reading_inserted
 
         self._lock = asyncio.Lock()
         self._running = False
@@ -106,6 +108,13 @@ class PollerService:
             valid_times = [s["last_synced_at"] for s in sync_states if s.get("last_synced_at")]
             if valid_times:
                 self.last_sync_time = max(valid_times)
+                self.last_sync_result = {
+                    "status": STATUS_OK,
+                    "trigger": TRIGGER_CADENCE,
+                    "completed_at": self.last_sync_time,
+                    "total_ingested": 0,
+                    "loggers": [],
+                }
         except Exception:
             pass
 
@@ -167,12 +176,20 @@ class PollerService:
             next_cursor = result.get("next_cursor")
 
             if records:
-                ingested = db.insert_readings(
+                inserted_rows = db.insert_readings(
                     records=records,
                     default_device_id=logger_id,
                     db_path=self.db_path,
                 )
-                total_ingested += ingested
+                total_ingested += len(inserted_rows)
+                if self.on_reading_inserted:
+                    for row in inserted_rows:
+                        try:
+                            res = self.on_reading_inserted(row)
+                            if asyncio.iscoroutine(res):
+                                await res
+                        except Exception as e:
+                            logger.warning(f"[poller] Broadcast hook error: {e}")
 
             if next_cursor:
                 db.update_sync_state(
@@ -279,7 +296,8 @@ class PollerService:
             }
 
             # Only advance last_sync_time if at least one logger was successfully synced
-            if any(r.get("status") == STATUS_OK for r in logger_results):
+            # or if periodic cadence sync ran so controller status reflects periodic runs
+            if any(r.get("status") == STATUS_OK for r in logger_results) or trigger_source == TRIGGER_CADENCE:
                 self.last_sync_time = completed_at
 
             self.last_sync_result = summary

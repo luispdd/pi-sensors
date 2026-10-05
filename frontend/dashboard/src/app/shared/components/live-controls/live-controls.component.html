@@ -1,0 +1,109 @@
+<div class="bg-card border border-theme rounded-xl p-4 shadow-sm space-y-3" data-testid="live-controls-card">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <!-- Header / Info -->
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-accent/15 border border-accent/25 flex items-center justify-center text-accent">
+        <span class="material-symbols-outlined text-[18px]">sensors</span>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h3 class="text-sm font-semibold text-text-primary">Live Monitoring</h3>
+          @if (isChecking()) {
+            <span
+              class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-white/5 text-text-muted border border-white/5"
+              data-testid="live-checking-badge"
+            >
+              <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
+              Checking...
+            </span>
+          } @else if (isLiveActive()) {
+            <span
+              class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400"
+              data-testid="live-active-badge"
+            >
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              Active ({{ activeRateSec() }}s rate &bull; {{ liveStatusList().length }} {{ liveStatusList().length === 1 ? 'node' : 'nodes' }})
+            </span>
+          } @else {
+            <span
+              class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-white/5 text-text-muted border border-white/5"
+              data-testid="live-inactive-badge"
+            >
+              Inactive
+            </span>
+          }
+        </div>
+        <p class="text-xs text-text-muted">Broadcast telemetry over MQTT at high frequency</p>
+      </div>
+    </div>
+
+    <!-- Inputs & Actions -->
+    <div class="flex flex-wrap items-center gap-2.5">
+      <div class="flex items-center gap-1.5">
+        <label for="liveRateInput" class="text-xs text-text-muted font-medium whitespace-nowrap">Rate (s):</label>
+        <input
+          id="liveRateInput"
+          type="number"
+          min="1"
+          step="1"
+          [value]="rateInput()"
+          (input)="onRateInputChange($any($event.target).value)"
+          placeholder="5"
+          class="w-24 bg-page border border-theme rounded-lg px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
+          data-testid="live-rate-input"
+          [disabled]="isSubmitting()"
+        />
+      </div>
+
+      <button
+        type="button"
+        (click)="startLive()"
+        [disabled]="isSubmitting()"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-all cursor-pointer disabled:opacity-50"
+        data-testid="start-live-btn"
+      >
+        <span class="material-symbols-outlined text-[16px]">play_arrow</span>
+        Start live
+      </button>
+
+      <button
+        type="button"
+        (click)="stopLive()"
+        [disabled]="isSubmitting()"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/15 border border-rose-500/30 text-rose-400 hover:bg-rose-500/25 transition-all cursor-pointer disabled:opacity-50"
+        data-testid="stop-live-btn"
+      >
+        <span class="material-symbols-outlined text-[16px]">stop</span>
+        Stop live
+      </button>
+    </div>
+  </div>
+
+  <!-- Validation Error -->
+  @if (validationError()) {
+    <div
+      class="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 px-3 py-1.5 rounded-lg flex items-center gap-2 animate-fade-in"
+      data-testid="live-rate-error"
+    >
+      <span class="material-symbols-outlined text-[16px]">warning</span>
+      <span>{{ validationError() }}</span>
+    </div>
+  }
+
+  <!-- Action Result Message -->
+  @if (resultMessage(); as result) {
+    <div
+      class="text-xs px-3 py-1.5 rounded-lg flex items-center gap-2 animate-fade-in"
+      [ngClass]="{
+        'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20': result.type === 'success',
+        'text-rose-400 bg-rose-500/10 border border-rose-500/20': result.type === 'error'
+      }"
+      data-testid="live-result-message"
+    >
+      <span class="material-symbols-outlined text-[16px]">
+        {{ result.type === 'success' ? 'check_circle' : 'error' }}
+      </span>
+      <span>{{ result.text }}</span>
+    </div>
+  }
+</div>

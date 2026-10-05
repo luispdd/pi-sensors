@@ -12,7 +12,7 @@ if PICO1W_LIB_DIR not in sys.path:
 if PICO1W_DIR not in sys.path:
     sys.path.insert(0, PICO1W_DIR)
 
-from core.state import AppState, MODE_SENSOR_DISPLAY, MODE_SEMI_SLEEP, MODE_MESSAGE
+from core.state import AppState, MODE_SENSOR_DISPLAY, MODE_SEMI_SLEEP, MODE_MESSAGE, MODE_DETAILS
 from hardware.sensors.dht22 import DHT22Sensor
 from hardware.ui import UIController
 from services.coap_server import CoapServer
@@ -144,6 +144,7 @@ class TestPico1wModularMigration(unittest.TestCase):
         self.assertIn('</sensors/humidity>;rt="humidity"', links)
         self.assertIn('</id>;rt="core.d"', links)
         self.assertIn('</display>;rt="display"', links)
+        self.assertIn('</live>;rt="live-stream";if="actuator"', links)
 
     def test_semi_sleep_on_demand_sampling(self):
         """Verify semi-sleep triggers on-demand read."""
@@ -166,24 +167,28 @@ class TestPico1wModularMigration(unittest.TestCase):
         ui = UIController(self.app_state)
         self.assertTrue(ui.display_on)
 
-        # Short press from SENSOR_DISPLAY -> SEMI_SLEEP
-        ui.handle_button("short", self.app_state)
+        # Long press from SENSOR_DISPLAY -> SEMI_SLEEP
+        ui.handle_button("long", self.app_state)
         self.assertEqual(self.app_state.mode, MODE_SEMI_SLEEP)
         self.assertFalse(ui.display_on)
 
-        # Short press from SEMI_SLEEP -> SENSOR_DISPLAY
+        # Wake while in SEMI_SLEEP -> SENSOR_DISPLAY
+        ui.handle_button("wake", self.app_state)
+        self.assertEqual(self.app_state.mode, MODE_SENSOR_DISPLAY)
+        self.assertTrue(ui.display_on)
+
+        # Enter MESSAGE_MODE, then short press restores previous mode
+        self.app_state.enter_message_mode("Test message")
+        self.assertEqual(self.app_state.mode, MODE_MESSAGE)
         ui.handle_button("short", self.app_state)
         self.assertEqual(self.app_state.mode, MODE_SENSOR_DISPLAY)
         self.assertTrue(ui.display_on)
 
-        # Set pending message, then semi-sleep -> message mode
-        self.app_state.enter_semi_sleep()
-        self.app_state.set_pending_message("Test message")
+        # Short press in SENSOR_DISPLAY -> DETAILS_MODE
         ui.handle_button("short", self.app_state)
-        self.assertEqual(self.app_state.mode, MODE_MESSAGE)
-        self.assertTrue(ui.display_on)
+        self.assertEqual(self.app_state.mode, MODE_DETAILS)
 
-        # Message mode -> sensor display mode
+        # Short press in DETAILS_MODE -> SENSOR_DISPLAY
         ui.handle_button("short", self.app_state)
         self.assertEqual(self.app_state.mode, MODE_SENSOR_DISPLAY)
 

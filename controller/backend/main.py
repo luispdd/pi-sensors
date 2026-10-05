@@ -9,9 +9,11 @@ import sys
 from aiohttp import web
 
 from backend import config, db
-from backend.api import POLLER_KEY, create_app
+from backend.api import MQTT_SUBSCRIBER_KEY, POLLER_KEY, WS_MANAGER_KEY, create_app
 from backend.coap_client import CoapClient
+from backend.mqtt_subscriber import MqttSubscriber
 from backend.poller import PollerService
+from backend.ws import WebSocketManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,7 +33,7 @@ def parse_args():
 
 
 async def on_startup(app: web.Application):
-    """Lifecycle startup hook: initializes DB and launches background poller."""
+    """Lifecycle startup hook: initializes DB and launches background poller and MQTT subscriber."""
     logger.info("Initializing SQLite database...")
     db.init_db(config.DB_PATH)
 
@@ -42,13 +44,26 @@ async def on_startup(app: web.Application):
     else:
         logger.info("Background cadence disabled by flag")
 
+    mqtt_sub: MqttSubscriber | None = app.get(MQTT_SUBSCRIBER_KEY)
+    if mqtt_sub:
+        logger.info(f"Starting background MQTT subscriber ({mqtt_sub.host}:{mqtt_sub.port})...")
+        mqtt_sub.start()
+
 
 async def on_cleanup(app: web.Application):
-    """Lifecycle shutdown hook: halts background poller cleanly."""
+    """Lifecycle shutdown hook: halts background poller, MQTT subscriber, and closes WebSockets cleanly."""
     logger.info("Shutting down background services...")
     poller: PollerService | None = app.get(POLLER_KEY)
     if poller:
         poller.stop()
+
+    mqtt_sub: MqttSubscriber | None = app.get(MQTT_SUBSCRIBER_KEY)
+    if mqtt_sub:
+        mqtt_sub.stop()
+
+    ws_mgr: WebSocketManager | None = app.get(WS_MANAGER_KEY)
+    if ws_mgr:
+        await ws_mgr.close_all()
 
 
 def main():

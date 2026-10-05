@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, effect, inject, signal } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ChartComponent } from 'ng-apexcharts';
@@ -6,7 +6,9 @@ import {
   ApexAxisChartSeries,
 } from 'ng-apexcharts';
 import { ApiService } from '../../services/api.service';
+import { WebSocketService } from '../../services/websocket.service';
 import { Node, Reading } from '../../models/api.models';
+
 import {
   BOARD_PALETTE,
   extractMetricValue,
@@ -70,34 +72,93 @@ export const METRIC_CONFIGS: Record<MetricType, MetricConfig> = {
   },
 };
 
-export interface DayRangeOption {
+export interface TimeRangeOption {
   label: string;
+  value: string;
+  durationMs: number | null;
   days: number | null;
 }
 
-export const DAY_RANGE_OPTIONS: readonly DayRangeOption[] = [
-  { label: 'Last 1d', days: 1 },
-  { label: 'Last 3d', days: 3 },
-  { label: 'Last 7d', days: 7 },
-  { label: 'Last 14d', days: 14 },
-  { label: 'Last 30d', days: 30 },
-  { label: 'All', days: null },
+export type DayRangeOption = TimeRangeOption;
+
+export const TIME_RANGE_OPTIONS: readonly TimeRangeOption[] = [
+  { label: 'Last 10m', value: '10m', durationMs: 10 * 60 * 1000, days: 10 / (24 * 60) },
+  { label: 'Last 1h', value: '1h', durationMs: 60 * 60 * 1000, days: 1 / 24 },
+  { label: 'Last 3h', value: '3h', durationMs: 3 * 3600 * 1000, days: 3 / 24 },
+  { label: 'Last 6h', value: '6h', durationMs: 6 * 3600 * 1000, days: 6 / 24 },
+  { label: 'Last 1d', value: '1d', durationMs: 24 * 3600 * 1000, days: 1 },
+  { label: 'Last 3d', value: '3d', durationMs: 3 * 24 * 3600 * 1000, days: 3 },
+  { label: 'Last 7d', value: '7d', durationMs: 7 * 24 * 3600 * 1000, days: 7 },
+  { label: 'Last 14d', value: '14d', durationMs: 14 * 24 * 3600 * 1000, days: 14 },
+  { label: 'Last 30d', value: '30d', durationMs: 30 * 24 * 3600 * 1000, days: 30 },
+  { label: 'All', value: 'all', durationMs: null, days: null },
 ] as const;
 
+export const DAY_RANGE_OPTIONS = TIME_RANGE_OPTIONS;
+
+export const GRAPHS_FILTER_STORAGE_KEY = 'pi-sensors:graphs-filter';
+
+export interface GraphsFilterState {
+  deviceId: string;
+  metric: string;
+  timeRange: string;
+  regularOnly: boolean;
+}
+
+export function findTimeRangeOption(val: string): TimeRangeOption | undefined {
+  return TIME_RANGE_OPTIONS.find(
+    (o) =>
+      o.value.toLowerCase() === val.toLowerCase() ||
+      o.value.toLowerCase() === `${val.toLowerCase()}d` ||
+      (o.days !== null && String(o.days) === val) ||
+      (val.toLowerCase() === 'all' && o.value === 'all')
+  );
+}
+
+export function getTimeRangeDurationMs(rangeVal: string): number | null {
+  const opt = findTimeRangeOption(rangeVal);
+  if (opt) {
+    return opt.durationMs;
+  }
+  if (rangeVal.endsWith('m')) {
+    const mins = Number(rangeVal.slice(0, -1));
+    return isNaN(mins) ? null : mins * 60 * 1000;
+  }
+  if (rangeVal.endsWith('h')) {
+    const hrs = Number(rangeVal.slice(0, -1));
+    return isNaN(hrs) ? null : hrs * 3600 * 1000;
+  }
+  if (rangeVal.endsWith('d')) {
+    const days = Number(rangeVal.slice(0, -1));
+    return isNaN(days) ? null : days * 86400000;
+  }
+  return null;
+}
+
 import { TopToolbarComponent } from '../../shared/components/top-toolbar/top-toolbar.component';
+import { LiveControlsComponent } from '../../shared/components/live-controls/live-controls.component';
 import { getThemeColor } from '../../shared/utils/theme.utils';
 import { CapabilitiesService, MetricOption } from '../../services/capabilities.service';
 
 @Component({
   selector: 'app-graphs',
   standalone: true,
-  imports: [CommonModule, FormsModule, DecimalPipe, ChartComponent, TopToolbarComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    DecimalPipe,
+    ChartComponent,
+    TopToolbarComponent,
+    LiveControlsComponent,
+  ],
   templateUrl: './graphs.component.html',
   styleUrl: './graphs.component.scss',
 })
 export class GraphsComponent {
   private readonly api = inject(ApiService);
   private readonly capabilitiesService = inject(CapabilitiesService);
+  private readonly wsService = inject(WebSocketService);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly NODE_ALL = NODE_ALL;
   readonly RANGE_ALL = RANGE_ALL;
@@ -105,11 +166,19 @@ export class GraphsComponent {
   readonly METRIC_HUMIDITY = METRIC_HUMIDITY;
   readonly METRIC_LIGHT = METRIC_LIGHT;
   readonly metrics = this.capabilitiesService.metrics;
-  readonly dayRangeOptions = DAY_RANGE_OPTIONS;
+  readonly timeRangeOptions = TIME_RANGE_OPTIONS;
+  readonly dayRangeOptions = TIME_RANGE_OPTIONS;
 
-  readonly selectedDeviceId = signal<string>(NODE_ALL);
-  readonly selectedMetric = signal<string>(METRIC_TEMPERATURE);
-  readonly selectedDays = signal<number | null>(7);
+  private readonly savedFilter = this.loadSavedFilters();
+
+  readonly selectedDeviceId = signal<string>(this.savedFilter?.deviceId ?? NODE_ALL);
+  readonly selectedMetric = signal<string>(this.savedFilter?.metric ?? METRIC_TEMPERATURE);
+  readonly selectedRange = signal<string>(this.savedFilter?.timeRange ?? '7d');
+  readonly selectedDays = signal<number | null>(
+    this.savedFilter ? (findTimeRangeOption(this.savedFilter.timeRange)?.days ?? null) : 7
+  );
+  readonly regularOnly = signal<boolean>(this.savedFilter?.regularOnly ?? false);
+  readonly liveReadings = signal<Reading[]>([]);
 
   readonly nodesResource = this.api.getNodes();
   readonly statusResource = this.api.getStatus();
@@ -117,19 +186,114 @@ export class GraphsComponent {
 
   readonly readingsResource = this.api.getReadings(() => {
     const devId = this.selectedDeviceId();
-    const days = this.selectedDays();
+    const durationMs = getTimeRangeDurationMs(this.selectedRange());
+    const isFineTuned = this.regularOnly() ? false : undefined;
     const since =
-      days !== null
-        ? new Date(Date.now() - days * 86400000).toISOString()
+      durationMs !== null
+        ? new Date(Date.now() - durationMs).toISOString()
         : undefined;
 
     return {
       device_id: devId !== NODE_ALL ? devId : undefined,
       since,
+      is_fine_tuned: isFineTuned,
     };
   });
 
-  readonly readings = computed<Reading[]>(() => this.readingsResource.value() ?? []);
+  private lastStatusRefreshTime = Date.now();
+
+  constructor() {
+    this.api.reloadStatus?.();
+
+    const cadenceTimer = setInterval(() => {
+      this.checkCadenceRefresh();
+    }, 1000);
+    this.destroyRef.onDestroy(() => clearInterval(cadenceTimer));
+
+    const sub = this.wsService.readings$.subscribe((reading) => {
+      this.handleIncomingReading(reading);
+    });
+    this.destroyRef.onDestroy(() => sub.unsubscribe());
+
+    effect(() => {
+      // Track signals for persistence
+      const _dev = this.selectedDeviceId();
+      const _met = this.selectedMetric();
+      const _range = this.selectedRange();
+      const _reg = this.regularOnly();
+      this.saveFilters();
+    });
+  }
+
+  checkCadenceRefresh(now: number = Date.now()): void {
+    const statusVal = this.statusResource.value() ?? this.api.cachedStatus?.();
+    const syncIntervalMs = (statusVal?.poller?.interval_s ?? 300) * 1000;
+    if (now - this.lastStatusRefreshTime >= syncIntervalMs) {
+      this.lastStatusRefreshTime = now;
+      this.statusResource.reload();
+    }
+  }
+
+  handleIncomingReading(reading: Reading): void {
+    // 1. Regular-only filter check: drop if regularOnly is active and reading is live
+    if (this.regularOnly() && reading.is_fine_tuned) {
+      return;
+    }
+
+    // 2. Matching device check
+    const currentDevice = this.selectedDeviceId();
+    if (currentDevice !== NODE_ALL && reading.device_id !== currentDevice) {
+      return;
+    }
+
+    // 3. Matching metric check
+    const currentMetric = this.selectedMetric();
+    const val = extractMetricValue(reading.metrics, currentMetric);
+    if (val === undefined || val === null || isNaN(val)) {
+      return;
+    }
+
+    // 4. Update or append live point
+    this.liveReadings.update((prev) => {
+      const idx = prev.findIndex((r) => r.device_id === reading.device_id && r.timestamp === reading.timestamp);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = reading;
+        return copy;
+      }
+      return [...prev, reading];
+    });
+  }
+
+  readonly allReadings = computed<Reading[]>(() => {
+    const fetched = this.readingsResource.value() ?? [];
+    const live = this.liveReadings();
+    if (live.length === 0) {
+      return fetched;
+    }
+    const isRegularOnly = this.regularOnly();
+    const currentDevice = this.selectedDeviceId();
+
+    const map = new Map<string, Reading>();
+    for (const r of fetched) {
+      map.set(`${r.device_id}:${r.timestamp}`, r);
+    }
+    for (const r of live) {
+      if (isRegularOnly && r.is_fine_tuned) {
+        continue;
+      }
+      if (currentDevice !== NODE_ALL && r.device_id !== currentDevice) {
+        continue;
+      }
+      map.set(`${r.device_id}:${r.timestamp}`, r);
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  });
+
+  readonly readings = computed<Reading[]>(() => this.allReadings());
+
   readonly isLoading = computed<boolean>(
     () =>
       this.readingsResource.isLoading() ||
@@ -401,24 +565,102 @@ export class GraphsComponent {
     };
   });
 
+  private loadSavedFilters(): GraphsFilterState | null {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const item = window.localStorage.getItem(GRAPHS_FILTER_STORAGE_KEY);
+        if (item) {
+          const parsed = JSON.parse(item);
+          if (parsed && typeof parsed === 'object') {
+            const rawRange = parsed.timeRange ?? parsed.range ?? (parsed.days ? `${parsed.days}d` : '7d');
+            const matchedOpt = findTimeRangeOption(String(rawRange));
+            return {
+              deviceId: typeof parsed.deviceId === 'string' ? parsed.deviceId : (typeof parsed.selectedDeviceId === 'string' ? parsed.selectedDeviceId : NODE_ALL),
+              metric: typeof parsed.metric === 'string' ? parsed.metric : (typeof parsed.selectedMetric === 'string' ? parsed.selectedMetric : METRIC_TEMPERATURE),
+              timeRange: matchedOpt ? matchedOpt.value : '7d',
+              regularOnly: typeof parsed.regularOnly === 'boolean' ? parsed.regularOnly : false,
+            };
+          }
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return null;
+  }
+
+  private saveFilters(): void {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const state: GraphsFilterState = {
+          deviceId: this.selectedDeviceId(),
+          metric: this.selectedMetric(),
+          timeRange: this.selectedRange(),
+          regularOnly: this.regularOnly(),
+        };
+        window.localStorage.setItem(GRAPHS_FILTER_STORAGE_KEY, JSON.stringify(state));
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  setRegularOnly(val: boolean): void {
+    if (this.regularOnly() !== val) {
+      this.regularOnly.set(val);
+      this.liveReadings.set([]);
+      this.saveFilters();
+    }
+  }
+
   selectMetric(metric: string): void {
-    this.selectedMetric.set(metric);
+    if (this.selectedMetric() !== metric) {
+      this.selectedMetric.set(metric);
+      this.liveReadings.set([]);
+      this.saveFilters();
+    }
   }
 
   onDeviceChange(event: Event): void {
     const select = event.target as HTMLSelectElement;
     this.selectedDeviceId.set(select.value);
+    this.liveReadings.set([]);
+    this.saveFilters();
+  }
+
+  selectRange(rangeVal: string): void {
+    const opt = findTimeRangeOption(rangeVal);
+    const val = opt ? opt.value : rangeVal;
+    if (this.selectedRange() !== val) {
+      this.selectedRange.set(val);
+      this.selectedDays.set(opt ? opt.days : null);
+      this.liveReadings.set([]);
+      this.saveFilters();
+    }
   }
 
   selectDays(days: number | null): void {
-    this.selectedDays.set(days);
+    if (days === null) {
+      this.selectRange('all');
+    } else {
+      const match = TIME_RANGE_OPTIONS.find((o) => o.days === days);
+      if (match) {
+        this.selectRange(match.value);
+      } else {
+        this.selectRange(`${days}d`);
+      }
+    }
+  }
+
+  onRangeChange(event: Event): void {
+    const select = event.target as HTMLSelectElement;
+    this.selectRange(select.value);
   }
 
   onDaysChange(event: Event): void {
-    const select = event.target as HTMLSelectElement;
-    const val = select.value;
-    this.selectedDays.set(val === RANGE_ALL || val === '' ? null : Number(val));
+    this.onRangeChange(event);
   }
+
 
   async refresh(): Promise<void> {
     await this.api.refresh([this.readingsResource, this.nodesResource, this.statusResource]);

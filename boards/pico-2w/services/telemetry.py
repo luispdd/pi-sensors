@@ -17,8 +17,7 @@ async def run_sensor_task(app_state, interval_s=getattr(config, "SENSOR_READ_INT
     while True:
         try:
             if app_state.mode != MODE_SEMI_SLEEP:
-                ts = get_utc_iso_timestamp() if app_state.ntp_synced else None
-                app_state.read_registered_sensors(timestamp=ts)
+                app_state.read_registered_sensors()
                 await asyncio.sleep(interval_s)
             else:
                 await asyncio.sleep(0.1)

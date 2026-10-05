@@ -40,8 +40,24 @@ The ST7735 TFT display and the MicroSD card reader share the **SPI0** hardware b
 * `services/` - `network_manager.py`, `webserver.py`, `coap_server.py`.
 * `hardware/` - `display.py` (TFT driver wrapper with SPI arbitration), `sensors.py` (stub), `controls.py` (stub).
 * `core/` - `state.py` application state management.
-* `lib/` - Libraries: `ST7735.py`, `sysfont.py`, `sdcard.mpy`, `microcoapy/`.
+* `lib/` - Libraries: `ST7735.py`, `sysfont.py`, `sdcard.mpy`, `microcoapy/`, `umqtt/`.
 * `test/` - Hardware validation scripts: `test_tft.py`, `test_sd.py`, `test_combined.py`, `test_sd_to_tft.py`.
+
+## Dependencies & Installation
+
+To install `umqtt.simple` via `mip`:
+
+```bash
+# Using mpremote CLI:
+mpremote mip install umqtt.simple
+```
+
+Or from the MicroPython REPL:
+
+```python
+import mip
+mip.install("umqtt.simple")
+```
 
 ## Deployment
 

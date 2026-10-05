@@ -73,6 +73,14 @@ class MockCoapClientForPoller:
         self.call_count += 1
         return self.log_pages[idx]
 
+    async def post_live_start(
+        self, ip: str, broker: str, rate_ms: int, port: Optional[int] = None
+    ) -> bool:
+        return True
+
+    async def post_live_stop(self, ip: str, port: Optional[int] = None) -> bool:
+        return True
+
 
 async def test_poller_sync():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -81,6 +89,9 @@ async def test_poller_sync():
 
         mock_client = MockCoapClientForPoller()
         poller = PollerService(db_path=test_db, coap_client=mock_client, poll_interval=1)
+
+        pushed_readings = []
+        poller.on_reading_inserted = lambda r: pushed_readings.append(r)
 
         # 1. Test Discovery
         discovered = await poller.discover_and_register()
@@ -99,16 +110,25 @@ async def test_poller_sync():
         caps_after_sync = db.get_all_capabilities(test_db)
         assert len(caps_after_sync) == 2
 
+        # Verify broadcast hook received all 3 newly inserted sync readings
+        assert len(pushed_readings) == 3
+        for item in pushed_readings:
+            assert item["device_id"] == "pico-2w-01"
+            assert item["is_fine_tuned"] is False
+            assert "metrics" in item
+
         # Verify DB records
         readings = db.query_readings(db_path=test_db)
         assert len(readings) == 3
         sync_state = db.get_sync_state("pico-2w-01", db_path=test_db)
         assert sync_state["last_cursor"] == "2026-09-23:3"
 
-        # 3. Test Repeated sync (already at EOF)
+        # 3. Test Repeated sync (already at EOF / duplicates)
         res_repeat = await poller.sync_now(trigger_source=TRIGGER_MANUAL)
         assert res_repeat["status"] == STATUS_OK
         assert res_repeat["total_ingested"] == 0
+        # Verify no duplicate rows were pushed to the broadcast hook
+        assert len(pushed_readings) == 3
 
         # 4. Test Concurrency Rejection
         async with poller._lock:
@@ -143,6 +163,15 @@ async def test_poller_sync():
             async def discover_nodes(self):
                 return []
         empty_poller = PollerService(db_path=empty_db, coap_client=EmptyCoapClient())
+        idle_res = await empty_poller.sync_now(trigger_source=TRIGGER_MANUAL)
+        assert idle_res["status"] == STATUS_OFFLINE
+        assert empty_poller.last_sync_time is None
+
+        # 7b. Test cadence sync updates last_sync_time even when nodes are offline (Task 6.3)
+        cadence_res = await empty_poller.sync_now(trigger_source=TRIGGER_CADENCE)
+        assert cadence_res["status"] == STATUS_OFFLINE
+        assert empty_poller.last_sync_time is not None
+        assert empty_poller.last_sync_time == cadence_res["completed_at"]
         # 8. Test probe_and_store_capabilities
         class SensorMockCoapClient(MockCoapClientForPoller):
             async def get_sensors(self, ip, port=None):

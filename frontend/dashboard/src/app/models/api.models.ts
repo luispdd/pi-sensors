@@ -71,11 +71,12 @@ export interface SensorMetrics {
 }
 
 export interface Reading {
-  id: number;
+  id?: number;
   timestamp: string;
   device_id: string;
   metrics: SensorMetrics;
-  ingested_at: string;
+  ingested_at?: string;
+  is_fine_tuned?: boolean;
 }
 
 export interface ReadingsQueryParams {
@@ -83,6 +84,7 @@ export interface ReadingsQueryParams {
   since?: string;
   until?: string;
   limit?: number;
+  is_fine_tuned?: boolean;
 }
 
 export interface DisplayMessageRequest {
@@ -107,3 +109,34 @@ export interface SyncResponse {
   status: string;
   [key: string]: unknown;
 }
+
+export interface LiveStatusItem {
+  device_id: string;
+  rate_ms: number;
+  started_at: string;
+}
+
+export interface LiveStartResult {
+  device_id: string;
+  status: 'success' | 'failed' | string;
+  error?: string;
+}
+
+export interface LiveStartResponse {
+  status: string;
+  rate_ms: number;
+  broker: string;
+  results: LiveStartResult[];
+}
+
+export interface LiveStopResult {
+  device_id: string;
+  status: 'success' | 'failed' | string;
+  error?: string;
+}
+
+export interface LiveStopResponse {
+  status: string;
+  results: LiveStopResult[];
+}
+

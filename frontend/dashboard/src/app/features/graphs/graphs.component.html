@@ -23,6 +23,9 @@
     </div>
   }
 
+  <!-- Live Controls Section -->
+  <app-live-controls />
+
   <!-- Interactive Controls Bar -->
   <div class="bg-card border border-theme rounded-xl p-5 shadow-lg space-y-4">
     <div class="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
@@ -67,24 +70,56 @@
           </select>
         </div>
 
-        <!-- Day-Range Filter -->
+        <!-- Time-Range Filter -->
         <div class="flex items-center gap-2">
           <label for="rangeSelect" class="text-xs text-text-muted font-medium whitespace-nowrap">Range:</label>
           <select
             id="rangeSelect"
-            [value]="selectedDays() === null ? RANGE_ALL : selectedDays()"
-            (change)="onDaysChange($event)"
+            [value]="selectedRange()"
+            (change)="onRangeChange($event)"
             class="bg-rail border border-theme rounded-lg px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent transition-colors"
             data-testid="range-select"
           >
-            @for (opt of dayRangeOptions; track opt.label) {
-              <option [value]="opt.days === null ? RANGE_ALL : opt.days">{{ opt.label }}</option>
+            @for (opt of timeRangeOptions; track opt.label) {
+              <option [value]="opt.value">{{ opt.label }}</option>
             }
           </select>
+        </div>
+
+        <!-- Data Filter Toggle: All vs Regular Only -->
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-text-muted font-medium whitespace-nowrap">Data:</label>
+          <div class="inline-flex rounded-lg border border-theme bg-rail p-0.5" role="group" data-testid="data-filter-toggle">
+            <button
+              type="button"
+              (click)="setRegularOnly(false)"
+              class="px-2.5 py-1 text-xs font-medium rounded-md transition-colors"
+              [ngClass]="{
+                'bg-accent/20 text-accent font-semibold': !regularOnly(),
+                'text-text-muted hover:text-text-primary': regularOnly()
+              }"
+              data-testid="filter-all-btn"
+            >
+              All Data
+            </button>
+            <button
+              type="button"
+              (click)="setRegularOnly(true)"
+              class="px-2.5 py-1 text-xs font-medium rounded-md transition-colors"
+              [ngClass]="{
+                'bg-accent/20 text-accent font-semibold': regularOnly(),
+                'text-text-muted hover:text-text-primary': !regularOnly()
+              }"
+              data-testid="filter-regular-btn"
+            >
+              Regular Only
+            </button>
+          </div>
         </div>
       </div>
     </div>
   </div>
+
 
 
 

@@ -17,5 +17,21 @@ mpremote fs cp -r ./* :
 ## Structure
 
 * `main.py` - Entry point for the application.
-* `lib/` - Contains all required dependencies (like `microcoapy` and `ssd1306.py`).
+* `lib/` - Contains all required dependencies (like `microcoapy`, `ssd1306.py`, and `umqtt/`).
 * `sensors.py`, `display.py`, `controls.py`, `state.py` - Core application modules.
+
+## Dependencies & Installation
+
+To install `umqtt.simple` via `mip`:
+
+```bash
+# Using mpremote CLI:
+mpremote mip install umqtt.simple
+```
+
+Or from the MicroPython REPL:
+
+```python
+import mip
+mip.install("umqtt.simple")
+```
