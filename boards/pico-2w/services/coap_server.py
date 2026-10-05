@@ -7,6 +7,7 @@ from settings import config
 from core.state import MODE_SEMI_SLEEP
 from services.ntp_service import get_utc_iso_timestamp
 from services.log_sync import read_log_records
+from services.live_publisher import LivePublisher
 
 try:
     import socket
@@ -120,11 +121,12 @@ def get_subnet_broadcast():
 
 
 class CoapServer:
-    def __init__(self, app_state, reader=None, sd_storage=None, port=getattr(config, "COAP_PORT", 5683)):
+    def __init__(self, app_state, reader=None, sd_storage=None, port=getattr(config, "COAP_PORT", 5683), live_publisher=None):
         self.app_state = app_state
         self.reader = reader
         self.sd_storage = sd_storage
         self.port = port
+        self.live_publisher = live_publisher or LivePublisher(app_state)
         self.coap = microcoapy.Coap()
         self.coap.debug = False
         self.coap.responseCallback = self._handle_response
@@ -138,6 +140,8 @@ class CoapServer:
             ("info", self._handle_info),
             ("sensors", self._handle_sensors_collection),
             ("display", self._handle_display),
+            ("live/start", self._handle_live_start),
+            ("live/stop", self._handle_live_stop),
             ("logger", self._handle_logger),
             ("log", self._handle_log),
         ]
@@ -322,6 +326,7 @@ class CoapServer:
 
         parts.extend([
             '</display>;rt="display";if="actuator"',
+            '</live>;rt="live-stream";if="actuator"',
             '</logger>;rt="data-logger";if="logger"',
             '</log>;rt="data-sync";if="logger"',
         ])
@@ -530,6 +535,74 @@ class CoapServer:
             packet.token, request_packet=packet,
         )
 
+    def _handle_live_start(self, packet, sender_ip, sender_port):
+        if packet.method != COAP_METHOD.COAP_POST:
+            self._send_method_not_allowed(packet, sender_ip, sender_port)
+            return
+
+        self._record_caller(sender_ip)
+
+        payload_bytes = packet.payload
+        if not payload_bytes:
+            self._send_bad_request(packet, sender_ip, sender_port, "Missing body")
+            return
+
+        try:
+            if isinstance(payload_bytes, (bytes, bytearray)):
+                payload_str = payload_bytes.decode("utf-8")
+            else:
+                payload_str = str(payload_bytes)
+            data = json.loads(payload_str)
+        except Exception:
+            self._send_bad_request(packet, sender_ip, sender_port, "Malformed JSON")
+            return
+
+        if not isinstance(data, dict):
+            self._send_bad_request(packet, sender_ip, sender_port, "JSON must be object")
+            return
+
+        broker = data.get("broker")
+        rate_ms = data.get("rate_ms")
+
+        if not broker or not isinstance(broker, str) or rate_ms is None or isinstance(rate_ms, bool) or not isinstance(rate_ms, int) or rate_ms <= 0:
+            self._send_bad_request(packet, sender_ip, sender_port, "Invalid broker or rate_ms")
+            return
+
+        if hasattr(self, "live_publisher") and self.live_publisher:
+            self.live_publisher.start(broker=broker, rate_ms=rate_ms)
+
+        self.coap.sendResponse(
+            sender_ip,
+            sender_port,
+            packet.messageid,
+            None,
+            COAP_RESPONSE_CODE.COAP_CHANGED,
+            COAP_CONTENT_FORMAT.COAP_NONE,
+            packet.token,
+            request_packet=packet,
+        )
+
+    def _handle_live_stop(self, packet, sender_ip, sender_port):
+        if packet.method != COAP_METHOD.COAP_POST:
+            self._send_method_not_allowed(packet, sender_ip, sender_port)
+            return
+
+        self._record_caller(sender_ip)
+
+        if hasattr(self, "live_publisher") and self.live_publisher:
+            self.live_publisher.stop()
+
+        self.coap.sendResponse(
+            sender_ip,
+            sender_port,
+            packet.messageid,
+            None,
+            COAP_RESPONSE_CODE.COAP_CHANGED,
+            COAP_CONTENT_FORMAT.COAP_NONE,
+            packet.token,
+            request_packet=packet,
+        )
+
     def _send_method_not_allowed(self, packet, sender_ip, sender_port):
         self.coap.sendResponse(
             sender_ip,
@@ -647,9 +720,13 @@ class CoapServer:
                 pass
 
         try:
-            sock.bind(("", self.port))
-        except Exception:
             sock.bind(("0.0.0.0", self.port))
+        except Exception:
+            try:
+                sock.bind(("", self.port))
+            except Exception:
+                pass
+
 
         sock.setblocking(False)
         self.coap.setCustomSocket(sock)

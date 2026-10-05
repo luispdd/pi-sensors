@@ -1,0 +1,97 @@
+## ADDED Requirements
+
+### Requirement: Live Monitoring Controls
+The dashboard SHALL provide a live monitoring controls widget with a refresh-rate input and Start and Stop live buttons, embedded inside or directly below the top toolbar as an independent component rendered across every primary page (Home, Nodes, Graphs). Start SHALL call `POST /api/live/start` with the entered rate, and Stop SHALL call `POST /api/live/stop`.
+
+#### Scenario: Start live
+- **WHEN** the user enters a rate and presses Start live
+- **THEN** the dashboard SHALL call `POST /api/live/start` with that rate and show the result
+
+#### Scenario: Stop live
+- **WHEN** the user presses Stop live
+- **THEN** the dashboard SHALL call `POST /api/live/stop` and show the result
+
+#### Scenario: Invalid rate entered
+- **WHEN** the rate input is empty or not a positive number
+- **THEN** the dashboard SHALL block the request and show a validation message
+
+#### Scenario: Global visibility across views
+- **WHEN** the user navigates between Home, Nodes, and Graphs pages
+- **THEN** the live monitoring controls widget SHALL remain accessible on every page and retain active live state without interruption
+
+### Requirement: Live Status Indicator
+The dashboard SHALL show, per node, whether it is currently live, based on `GET /api/live/status`.
+
+#### Scenario: Live node shown
+- **WHEN** a node appears in the live status response
+- **THEN** the dashboard SHALL mark it live and show its rate
+
+#### Scenario: Not live
+- **WHEN** a node is absent from the live status response
+- **THEN** the dashboard SHALL show it as not live
+
+### Requirement: Graph Data Filter Toggle
+The Graphs page SHALL provide a toggle between regular data only and all data (including fine-tuned live readings), using the same chart for both.
+
+#### Scenario: Regular only
+- **WHEN** the toggle is set to regular only
+- **THEN** the chart SHALL request and show only readings with `is_fine_tuned = false`
+
+#### Scenario: All data
+- **WHEN** the toggle is set to all data
+- **THEN** the chart SHALL show both regular and live readings
+
+### Requirement: Live Chart Updates over WebSocket
+The dashboard SHALL connect to the controller WebSocket and append incoming readings to the chart currently showing that `device_id` and metric, without polling. Readings SHALL be sorted chronologically using the timestamps reported by the boards. Readings SHALL be stored whether or not a dashboard tab is open.
+
+#### Scenario: Matching reading arrives
+- **WHEN** a pushed reading matches the displayed device and metric, and passes the current filter toggle
+- **THEN** the chart SHALL append the point and maintain chronological ordering sorted by board timestamp
+
+#### Scenario: Non-matching reading arrives
+- **WHEN** a pushed reading is for another device or metric
+- **THEN** the chart SHALL not change
+
+#### Scenario: Regular-only filter active
+- **WHEN** the toggle is regular only and a live reading arrives
+- **THEN** the chart SHALL not append it
+
+### Requirement: Page Filter State Persistence in Local Storage
+The dashboard SHALL persist user filter and view selections in browser `localStorage` and restore them when returning to the corresponding pages.
+
+#### Scenario: Graphs page filter restoration
+- **WHEN** the user selects a node, metric, time range (e.g. 10m, 1h, 3h, 6h, 1d, 3d, 7d, 14d, 30d, All), or regular-only filter toggle on the Graphs page and subsequently returns to the page
+- **THEN** the Graphs view SHALL restore the previously saved selections from `localStorage` and apply them to the chart query
+
+#### Scenario: Home page filter restoration
+- **WHEN** the user selects a metric or reading count limit on the Home page and subsequently returns to the page
+- **THEN** the Home view SHALL restore the previously saved selections from `localStorage` and apply them to the activity chart
+
+## MODIFIED Requirements
+
+### Requirement: Interactive Time-Series Graphs
+The Graphs view MUST provide interactive time-series charts allowing the user to select specific nodes, metrics, and a time range. Metrics MUST be populated dynamically from the capabilities API. A time-range selector (Last 10m | 1h | 3h | 6h | 1d | 3d | 7d | 14d | 30d | All) MUST replace the previous count-based limit selector and constrain the chart to readings within the selected window; All means no time constraint. When All Nodes is selected, each board MUST be rendered as a separate series with a distinct color. A statistics table (Board | Min | Max | Avg | Latest) MUST appear beneath the chart whenever one or more boards contribute data, replacing the previous card-based widgets. A legend MUST be displayed at the bottom of the chart.
+
+#### Scenario: View metric history for a specific node
+- **WHEN** the user selects a single node and a metric in the Graphs view
+- **THEN** the chart visualizes that metric's readings over the selected time range as a single series
+
+#### Scenario: View all boards simultaneously
+- **WHEN** the user selects All Nodes in the Graphs view
+- **THEN** the chart renders one distinctly colored series per board for the selected metric, along with a legend at the bottom
+
+#### Scenario: Select day range
+- **WHEN** the user selects a day-range option (e.g. Last 7d)
+- **THEN** the chart fetches readings with a `since` parameter set to the start of that window, omitting `limit` so that all readings within the window are displayed, and re-renders accordingly
+
+#### Scenario: Select sub-day range period
+- **WHEN** the user selects a sub-day range option (Last 10m, 1h, 3h, or 6h)
+- **THEN** the chart fetches readings with a `since` parameter set to current timestamp minus the selected duration (10 minutes, 1 hour, 3 hours, or 6 hours), omitting `limit`, and re-renders accordingly
+
+#### Scenario: Select All time range
+- **WHEN** the user selects All from the day-range selector
+- **THEN** the chart fetches all stored readings without a time constraint or count limit and renders them
+
+#### Scenario: Statistics table visible beneath chart
+- **WHEN** one or more boards contribute readings to the current chart view
+- **THEN** a table is displayed beneath the chart with one row per board showing Min, Max, Avg, and Latest values for the selected metric, replacing the card-based widgets

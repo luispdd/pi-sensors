@@ -156,6 +156,7 @@ class TestPico2wModularMigration(unittest.TestCase):
         self.assertIn('</sensors/light>;rt="light"', links)
         self.assertIn('</id>;rt="core.d"', links)
         self.assertIn('</display>;rt="display"', links)
+        self.assertIn('</live>;rt="live-stream";if="actuator"', links)
         self.assertIn('</logger>;rt="data-logger"', links)
         self.assertIn('</log>;rt="data-sync"', links)
 

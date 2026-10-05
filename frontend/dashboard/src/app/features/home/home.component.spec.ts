@@ -1,10 +1,12 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
+import { Subject } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { HomeComponent } from './home.component';
+import { HomeComponent, HOME_FILTER_STORAGE_KEY } from './home.component';
 import { ApiService } from '../../services/api.service';
 import { CapabilitiesService } from '../../services/capabilities.service';
+import { WebSocketService } from '../../services/websocket.service';
 import { BOARD_PALETTE } from '../../shared/utils/chart.utils';
 import {
   Node,
@@ -14,6 +16,7 @@ import {
   SYNC_STATUS_OFFLINE,
   SYNC_STATUS_IDLE,
   SYNC_STATUS_ERROR,
+  METRIC_HUMIDITY,
 } from '../../models/api.models';
 
 describe('HomeComponent', () => {
@@ -69,12 +72,22 @@ describe('HomeComponent', () => {
   let mockApiService: any;
   let getReadingsParamsFn: (() => { limit?: number } | undefined) | undefined;
 
+  let readingsSubject: Subject<Reading>;
+  let mockWsService: any;
+
   beforeEach(async () => {
+    localStorage.clear();
     statusSignal = signal<SystemStatus | undefined>(mockStatus);
     nodesSignal = signal<Node[]>(mockNodes);
     readingsSignal = signal<Reading[]>(mockReadings);
     statusErrorSignal = signal<any>(undefined);
     getReadingsParamsFn = undefined;
+    readingsSubject = new Subject<Reading>();
+    mockWsService = {
+      readings$: readingsSubject.asObservable(),
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    };
 
     mockApiService = {
       getStatus: vi.fn().mockReturnValue({
@@ -102,6 +115,20 @@ describe('HomeComponent', () => {
       sync: vi.fn().mockResolvedValue({ status: 'ok', total_ingested: 0 }),
       refresh: vi.fn().mockResolvedValue(undefined),
       lastRefreshTimestamp: signal(Date.now()),
+      getLiveStatus: vi.fn().mockReturnValue({
+        value: signal([]),
+        isLoading: signal(false),
+        error: signal(undefined),
+        reload: vi.fn(),
+      }),
+      checkLiveStatus: vi.fn().mockResolvedValue([]),
+      hasCheckedLiveStatus: signal(true),
+      isCheckingLiveStatus: signal(false),
+      liveStatusItems: signal([]),
+      isLiveActive: signal(false),
+      activeLiveRateMs: signal(null),
+      startLive: vi.fn().mockResolvedValue({ status: 'ok', results: [] }),
+      stopLive: vi.fn().mockResolvedValue({ status: 'ok', results: [] }),
     };
 
     await TestBed.configureTestingModule({
@@ -109,6 +136,7 @@ describe('HomeComponent', () => {
       providers: [
         provideRouter([]),
         { provide: ApiService, useValue: mockApiService },
+        { provide: WebSocketService, useValue: mockWsService },
       ],
     }).compileComponents();
 
@@ -378,5 +406,157 @@ describe('HomeComponent', () => {
 
     expect(component.selectedCount()).toBeNull();
     expect(getReadingsParamsFn?.()).toBeUndefined();
+  });
+
+  describe('Task 6.2: WebSocket Telemetry Updates in HomeComponent', () => {
+    it('should append incoming live reading to chart series automatically without manual reload', () => {
+      const initialSeries = component.chartSeries();
+      expect(initialSeries.length).toBe(1);
+      expect(initialSeries[0].data.length).toBe(1);
+
+      readingsSubject.next({
+        id: 2,
+        timestamp: '2026-09-24T12:01:00Z',
+        device_id: 'node-01',
+        metrics: { temperature: 23.5 },
+        is_fine_tuned: true,
+      });
+      fixture.detectChanges();
+
+      const updatedSeries = component.chartSeries();
+      expect(updatedSeries[0].data.length).toBe(2);
+      const points = updatedSeries[0].data as { x: number; y: number }[];
+      expect(points[1].y).toBe(23.5);
+    });
+
+    it('should increment totalRecords and update node last_seen upon incoming live reading', () => {
+      const initialRecords = component.totalRecords();
+      expect(initialRecords).toBe(1250);
+
+      readingsSubject.next({
+        id: 3,
+        timestamp: '2026-09-24T12:02:00Z',
+        device_id: 'node-02',
+        metrics: { light: 85 },
+        is_fine_tuned: true,
+      });
+      fixture.detectChanges();
+
+      expect(component.totalRecords()).toBe(1251);
+
+      const node2 = component.nodes().find((n) => n.device_id === 'node-02');
+      expect(node2?.last_seen).toBe('2026-09-24T12:02:00Z');
+    });
+
+    it('should slice readings to selectedCount limit when count limit is active', () => {
+      component.selectCount(2);
+
+      readingsSubject.next({
+        id: 10,
+        timestamp: '2026-09-24T12:05:00Z',
+        device_id: 'node-01',
+        metrics: { temperature: 24.0 },
+      });
+      readingsSubject.next({
+        id: 11,
+        timestamp: '2026-09-24T12:06:00Z',
+        device_id: 'node-01',
+        metrics: { temperature: 24.5 },
+      });
+      fixture.detectChanges();
+
+      expect(component.readings().length).toBe(2);
+      expect(component.readings()[1].timestamp).toBe('2026-09-24T12:06:00Z');
+    });
+
+    it('should clear live readings and count on reloadAll', () => {
+      readingsSubject.next({
+        id: 20,
+        timestamp: '2026-09-24T12:10:00Z',
+        device_id: 'node-01',
+        metrics: { temperature: 25.0 },
+      });
+      fixture.detectChanges();
+      expect(component.liveReadings().length).toBe(1);
+      expect(component.liveCount()).toBe(1);
+
+      component.reloadAll();
+      fixture.detectChanges();
+
+      expect(component.liveReadings().length).toBe(0);
+      expect(component.liveCount()).toBe(0);
+    });
+  });
+
+  describe('Task 6.3: Poller Sync Status and Last Sync Time', () => {
+    it('should reflect completed_at from last_result when last_sync is null (e.g. startup offline)', () => {
+      statusSignal.set({
+        ...mockStatus,
+        poller: {
+          last_sync: null,
+          last_result: {
+            status: 'offline',
+            completed_at: '2026-09-24T12:05:00Z',
+          },
+          interval_s: 300,
+        },
+      });
+      fixture.detectChanges();
+
+      expect(component.lastSyncStatus()).toBe(SYNC_STATUS_OFFLINE);
+      expect(component.lastSyncTime()).toBe('2026-09-24T12:05:00Z');
+      expect(component.lastSyncTimeFormatted()).not.toBe('Never');
+    });
+
+    it('should reflect periodic sync status and updated last_sync when cadence run succeeds', () => {
+      statusSignal.set({
+        ...mockStatus,
+        poller: {
+          last_sync: '2026-09-24T12:05:00Z',
+          last_result: {
+            status: 'ok',
+            completed_at: '2026-09-24T12:05:00Z',
+          },
+          interval_s: 300,
+        },
+      });
+      fixture.detectChanges();
+
+      expect(component.lastSyncStatus()).toBe(SYNC_STATUS_OK);
+      expect(component.lastSyncTime()).toBe('2026-09-24T12:05:00Z');
+      expect(component.lastSyncTimeFormatted()).not.toBe('Never');
+    });
+
+    it('should render live controls component below top toolbar (Task 7.1)', () => {
+      const liveControlsEl = fixture.nativeElement.querySelector('app-live-controls');
+      expect(liveControlsEl).toBeTruthy();
+    });
+  });
+
+  describe('LocalStorage Filter Persistence (Task 7.3)', () => {
+    it('should persist selected metric and count to localStorage when changed', () => {
+      component.selectMetric(METRIC_HUMIDITY);
+      component.selectCount(100);
+
+      const stored = localStorage.getItem(HOME_FILTER_STORAGE_KEY);
+      expect(stored).toBeTruthy();
+      const parsed = JSON.parse(stored!);
+      expect(parsed.metric).toBe(METRIC_HUMIDITY);
+      expect(parsed.count).toBe(100);
+    });
+
+    it('should restore saved filter from localStorage on initialization', () => {
+      localStorage.setItem(
+        HOME_FILTER_STORAGE_KEY,
+        JSON.stringify({ metric: METRIC_HUMIDITY, count: 200 })
+      );
+
+      const restoredFixture = TestBed.createComponent(HomeComponent);
+      const restoredComponent = restoredFixture.componentInstance;
+      restoredFixture.detectChanges();
+
+      expect(restoredComponent.selectedMetric()).toBe(METRIC_HUMIDITY);
+      expect(restoredComponent.selectedCount()).toBe(200);
+    });
   });
 });

@@ -316,6 +316,7 @@ class CoapClient:
         port: Optional[int] = None,
         timeout: Optional[float] = None,
         retries: Optional[int] = None,
+        content_format: Optional[int] = None,
     ) -> CoapMessage:
         """Sends a CoAP request and waits for an answer with retry logic."""
         target_port = port or self.port
@@ -333,6 +334,13 @@ class CoapClient:
         msg.add_uri_path(path)
         if query:
             msg.add_uri_query(query)
+        if content_format is not None:
+            if content_format == 0:
+                msg.options.append((OPT_CONTENT_FORMAT, b""))
+            elif content_format < 256:
+                msg.options.append((OPT_CONTENT_FORMAT, bytes([content_format])))
+            else:
+                msg.options.append((OPT_CONTENT_FORMAT, struct.pack("!H", content_format)))
 
         packet_bytes = msg.encode()
 
@@ -370,11 +378,11 @@ class CoapClient:
         target_port: Optional[int] = None,
         timeout: float = 1.2,
     ) -> List[Dict[str, Any]]:
-        """Broadcasts and multicasts discovery probes to identify LAN IoTMesh nodes."""
+        """Broadcasts discovery probes to identify LAN IoTMesh nodes."""
         port = target_port or self.port
         destinations = get_subnet_broadcasts()
-        if config.COAP_MULTICAST_ADDR not in destinations:
-            destinations.append(config.COAP_MULTICAST_ADDR)
+        if "192.168.1.255" not in destinations:
+            destinations.insert(0, "192.168.1.255")
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -502,3 +510,37 @@ class CoapClient:
         if resp.code != CODE_CONTENT:
             raise RuntimeError(f"Unexpected CoAP response code {resp.code} for GET /sensors")
         return json.loads(resp.payload.decode("utf-8"))
+
+    async def post_live_start(
+        self,
+        ip: str,
+        broker: str,
+        rate_ms: int,
+        port: Optional[int] = None,
+    ) -> bool:
+        """Sends POST /live/start to a node with broker address and streaming rate."""
+        payload = json.dumps({"broker": broker, "rate_ms": rate_ms}).encode("utf-8")
+        resp = await self.send_request(
+            ip=ip,
+            path="live/start",
+            method=METHOD_POST,
+            payload=payload,
+            content_format=FORMAT_APPLICATION_JSON,
+            port=port,
+        )
+        return resp.code in (CODE_CHANGED, CODE_CONTENT)
+
+    async def post_live_stop(
+        self,
+        ip: str,
+        port: Optional[int] = None,
+    ) -> bool:
+        """Sends POST /live/stop to a node."""
+        resp = await self.send_request(
+            ip=ip,
+            path="live/stop",
+            method=METHOD_POST,
+            payload=b"",
+            port=port,
+        )
+        return resp.code in (CODE_CHANGED, CODE_CONTENT)

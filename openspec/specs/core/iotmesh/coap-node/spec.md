@@ -7,26 +7,11 @@ Provides a CoAP server that responds to CoRE Link Format discovery requests and 
 ## Requirements
 
 ### Requirement: CoAP UDP Binding
-The system SHALL bind a UDP socket on port 5683 to listen for CoAP messages, including unicast, broadcast (`255.255.255.255`), and IPv4 multicast (`224.0.1.187`) destinations.
+The system SHALL bind a UDP socket on port 5683 to listen for CoAP messages, including unicast and subnet broadcast (`192.168.1.255`) destinations.
 
 #### Scenario: Bind successfully
 - **WHEN** the system initializes network services
 - **THEN** it successfully starts listening on UDP port 5683
-
-### Requirement: CoAP IPv4 Multicast Group Membership
-The system SHALL join the CoAP all-nodes IPv4 multicast group `224.0.1.187` (RFC 7252 §12.8) after binding the UDP socket, so that it receives multicast discovery requests from other nodes on the local network.
-
-The join SHALL be attempted using `IP_ADD_MEMBERSHIP` with `INADDR_ANY` as the interface address. If the underlying network stack does not support this socket option (e.g. some MicroPython builds), the join SHALL fail gracefully with a log message and the server SHALL continue operating on unicast and broadcast only.
-
-#### Scenario: Multicast join succeeds
-- **WHEN** the CoAP server starts and `IP_ADD_MEMBERSHIP` is available
-- **THEN** the board joins `224.0.1.187` and logs `[coap] Joined multicast group 224.0.1.187`
-- **AND** the board responds to `GET coap://224.0.1.187/.well-known/core` requests
-
-#### Scenario: Multicast join not supported
-- **WHEN** the CoAP server starts and `IP_ADD_MEMBERSHIP` is not available on the platform
-- **THEN** the board logs `[coap] Multicast join skipped (not supported): <reason>`
-- **AND** the server continues listening on unicast and broadcast
 
 ### Requirement: CoRE Link Discovery
 The system SHALL respond to `GET /.well-known/core` requests with a CoRE Link Format payload enumerating its identity, sensor endpoints (including `</sensors/light>;rt="light";if="sensor"` on boards equipped with a light sensor), and actuator endpoints.

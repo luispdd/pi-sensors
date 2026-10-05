@@ -77,6 +77,11 @@ class DataLogger:
 
         # 1. Local board reading
         if local_ip in self.app_state.log_active_nodes or local_id in self.app_state.log_active_nodes.values():
+            if hasattr(self.app_state, "read_registered_sensors"):
+                try:
+                    self.app_state.read_registered_sensors()
+                except Exception:
+                    pass
             metrics = self.app_state.get_all_metrics() if hasattr(self.app_state, "get_all_metrics") else {}
             temp = metrics.get("temperature", {}).get("val") if "temperature" in metrics else getattr(self.app_state, "temperature_c", None)
             hum = metrics.get("humidity", {}).get("val") if "humidity" in metrics else getattr(self.app_state, "humidity_pct", None)
@@ -207,6 +212,18 @@ class DataLogger:
 
         # Immediate measurement on session start before entering sleep cycle
         if self.app_state.logging_active:
+            try:
+                import time
+                success, res = sync_ntp()
+                if success:
+                    now_epoch = time.time()
+                    if hasattr(self.app_state, "set_time"):
+                        self.app_state.set_time(now_epoch, synced=True)
+                    if hasattr(self.app_state, "log_ntp_time_str"):
+                        self.app_state.log_ntp_time_str = res
+                    print(f"[logger] Initial NTP sync before measurement: {res}")
+            except Exception as e:
+                print(f"[logger] NTP sync error before initial poll: {e}")
             await self.poll_and_buffer()
 
         elapsed_since_flush = 0
@@ -223,6 +240,20 @@ class DataLogger:
 
             if not self.app_state.logging_active:
                 break
+
+            # Sync NTP time every time periodic measures are taken to keep both aligned
+            try:
+                import time
+                success, res = sync_ntp()
+                if success:
+                    now_epoch = time.time()
+                    if hasattr(self.app_state, "set_time"):
+                        self.app_state.set_time(now_epoch, synced=True)
+                    if hasattr(self.app_state, "log_ntp_time_str"):
+                        self.app_state.log_ntp_time_str = res
+                    print(f"[logger] Periodic NTP sync before measurement: {res}")
+            except Exception as e:
+                print(f"[logger] NTP sync error before periodic poll: {e}")
 
             # Poll sensors
             await self.poll_and_buffer()

@@ -1,5 +1,5 @@
 import {
-  Injectable,
+  Service,
   computed,
   inject,
   signal,
@@ -153,9 +153,7 @@ export function resolveMetricConfig(
   return createDefaultMetricConfig(selectedKey);
 }
 
-@Injectable({
-  providedIn: 'root',
-})
+@Service()
 export class CapabilitiesService {
   private readonly baseUrl = inject(API_BASE_URL);
   private readonly injector = inject(EnvironmentInjector);

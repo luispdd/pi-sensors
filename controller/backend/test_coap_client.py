@@ -113,6 +113,25 @@ class MockCoapServer:
                 elif path == "display":
                     resp.code = CODE_CHANGED
                     resp.payload = b""
+                elif path == "live/start":
+                    if req.code == METHOD_POST:
+                        try:
+                            body = json.loads(req.payload.decode("utf-8"))
+                            if "broker" in body and "rate_ms" in body and body["rate_ms"] > 0:
+                                resp.code = CODE_CHANGED
+                            else:
+                                resp.code = 128
+                        except Exception:
+                            resp.code = 128
+                    else:
+                        resp.code = 133
+                    resp.payload = b""
+                elif path == "live/stop":
+                    if req.code == METHOD_POST:
+                        resp.code = CODE_CHANGED
+                    else:
+                        resp.code = 133
+                    resp.payload = b""
                 else:
                     resp.code = 132  # 4.04 Not Found
 
@@ -155,6 +174,18 @@ async def test_client_requests():
         disp_res = await client.post_display("127.0.0.1", "Hello Pico!", port=test_port)
         assert disp_res is True
         print("CoAP POST /display test passed!")
+
+        # 3. Test POST /live/start
+        live_start_res = await client.post_live_start(
+            "127.0.0.1", broker="192.168.1.100:1883", rate_ms=1000, port=test_port
+        )
+        assert live_start_res is True
+        print("CoAP POST /live/start test passed!")
+
+        # 4. Test POST /live/stop
+        live_stop_res = await client.post_live_stop("127.0.0.1", port=test_port)
+        assert live_stop_res is True
+        print("CoAP POST /live/stop test passed!")
 
     finally:
         server.stop()

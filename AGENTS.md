@@ -1,6 +1,8 @@
 -Do not ever stage or commit files on your own.
 -Don't modify the external libraries, like `lib/microcoapy`, etc. in the codebase.
 -Don't ever take decisions about new functionalities or user-facing changes without consulting the user.
+-Don't ever start taking actions or making fixes on your own will. When anything is not working, research, and when you think you found the problem, summarize those findings to the user so the user decides whether and how it should be resolved or added to the tasks list.
+-Use `bun` / `bunx` for running scripts, and package management in the frontend and `uv` for controller.
 
 ## Operational Pitfalls & Gotchas
 - **No Speculative Sensors / Metrics**: Never invent unrequested sensor types, metrics, or mock labels. Only implement sensors explicitly confirmed by the user.
@@ -13,11 +15,28 @@
 - **Board-Specific PIR GPIO Input Pulls**: Pico 2 W (RP2350) GPIO pads enable internal pull-ups by default upon reset; unpulled inputs float HIGH and peg rolling motion at 100%, requiring `Pin(pin, Pin.IN, Pin.PULL_DOWN)`. Conversely, ESP32-C6 internal pull-down (~45kΩ) forms a voltage divider with the AM312 output stage attenuating HIGH pulses below $V_{IH}$ (causing 0% detection failure); ESP32-C6 requires high-impedance `Pin(pin, Pin.IN)` without pull-down.
 - **Fixed-Point Rounding Trap in Decay Filters**: In exponential smoothing `last = round(last + (0 - last) * release, 1)`, a decay factor like `release = 0.2` locks at `0.2%` forever ($0.2 \times 0.8 = 0.16 \xrightarrow{\text{round}} 0.2$). Always maintain an unrounded float accumulator (`_smoothed_pct`) and snap to `0.0` when below a threshold before rounding for external consumers.
 - **MicroPython Platform Detection**: Do not use `sys.implementation._machine` (does not exist in MicroPython and raises `AttributeError`). Check `getattr(sys, "platform", "")` (`"esp32"` vs `"rp2"`) or `os.uname().machine`.
+- **Async Task Scheduling Without Event Loop**: In dual CPython/MicroPython services, calling `asyncio.create_task(coro())` directly in constructors or synchronous start methods crashes with `RuntimeError: no running event loop` in CPython (e.g. during synchronous unit tests) and leaks unawaited coroutines. Guard with `if hasattr(asyncio, "get_running_loop"): loop = asyncio.get_running_loop(); self._task = loop.create_task(self._loop())` inside a `try ... except RuntimeError:` block to safely no-op or defer task creation when running outside an event loop.
+- **Board Timestamp Authority & Internal Timekeeping**: Never perform ad-hoc NTP lookups or clock queries during sensor sampling, endpoint handling, or live publishing. Boards advance their internal timestamp continuously via a 1-second tick loop (`run_ntp_task` invoking `app_state.tick_timestamp(1)`). Sensor readers and `LivePublisher` read the active `app_state.timestamp`. NTP sync acts strictly as a periodic baseline anchor (every 5 minutes) via `app_state.set_time(epoch)` to correct oscillator drift.
+- **Direct Verification Without Over-Investigation**: When asked a specific question, do not perform unprompted secondary diagnostics (network pings, controller queries, dmesg parsing) unless explicitly requested.
+- **Task Completion Integrity**: Never mark a task `- [x]` or report it complete solely because planning documentation was revised or legacy unit tests passed. An implementation task is only complete when functional code changes are executed, integrated across boards, and verified with tests that specifically exercise the newly required behavior.
+- **Angular `httpResource` Duplication Across Components**: Calling `httpResource` inside service factory methods without caching creates a new `HttpResourceRef` on every call, firing duplicate HTTP requests on page load when multiple components on the same view (e.g., parent page and embedded toolbars) request the same endpoint. Cache and return singleton `HttpResourceRef` instances in the service for shared read-only endpoints (`/api/status`, `/api/live/status`).
+- **Lazy `httpResource` Reactive Effect Context**: When encapsulating lazy singleton `httpResource` instances inside service methods, register any reactive synchronization `effect()` inside `runInInjectionContext(this.injector, () => { ... })` alongside the resource allocation, rather than in the service constructor where the resource instance does not yet exist.
+- **WebSocket Guard on Initial Async Live Status**: When connecting/disconnecting WebSockets reactively based on live stream activity (`isLiveActive()`), do not disconnect while live status is still indeterminate on boot/navigation. Guard the disconnect branch with `hasCheckedLiveStatus()` to avoid killing active sockets before `/api/live/status` resolves.
+- **Dynamic USB Serial Port Enumeration**: Post-reboot, serial ports (`/dev/ttyACM*`) shuffle across devices. Run `mpremote connect /dev/ttyACM<N> exec "import os; print(getattr(os.uname(), 'machine', ''))"` to identify boards deterministically (`RP2350` -> `pico-2w`, `RP2040` -> `pico-1w`, `ESP32-C6` -> `esp32c6`) before flashing.
+- **Playwright MCP Chromium Configuration**: `@playwright/mcp` defaults to the branded Google Chrome channel (`/opt/google/chrome/chrome`), failing when only Playwright's open-source Chromium builds exist in `~/.cache/ms-playwright/`. Because `--browser chromium` is not an accepted channel value, configure `--executable-path <path_to_chromium_binary>` in `~/.gemini/config/mcp_config.json`. If the MCP process is terminated, the IDE's active client transport reports `EOF`; do not execute speculative package installations, prompt for an IDE/MCP reload instead.
+- **Playwright E2E Testing Workflow & Scope**:
+  - **When to Use**: Use for full-stack integration verification across the UI (`:4200`), controller API/WebSockets (`:8000`), and live boards—specifically for flows that unit tests cannot capture (real-time DOM reactivity without manual page reloads, live WebSocket telemetry propagation, navigation state persistence, and cross-tier UI interactions). Do not use for pure business logic, isolated utility calculations, or backend validation covered faster by unit tests.
+  - **How to Drive**: Use `@playwright/mcp` lazy tools (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_wait_for`). Prefer `browser_snapshot` (accessibility tree) over screenshots for token-efficient DOM inspection and element ref discovery. For asynchronous events (WebSocket updates, sync ticks), use `browser_wait_for` before taking follow-up snapshots to verify dynamic UI changes (e.g. data counters incrementing).
+  - **Session Hygiene & Cleanup**: Always revert any triggered actions (e.g., clicking "Stop live" to stop hardware streaming) and invoke `browser_close` at the conclusion of the test flow to terminate headless Chromium cleanly and avoid orphaned processes.
 
 ## Verification Commands
-- **Unit Tests**: `python3 -m unittest discover -s boards/<board>/test`
+- **Frontend Unit Tests**: `(cd frontend/dashboard && bun run ng test --no-watch)`
+- **Frontend Build**: `(cd frontend/dashboard && bun run build)`
+- **Board Unit Tests**: `python3 -m unittest discover -s boards/<board>/test`
+- **Controller Unit Tests**: `(cd controller && uv run python -m unittest discover -s backend)` (tests reside directly in `controller/backend/test_*.py`, run through `uv` environment, not global `pytest`).
 - **OpenSpec Validation**:
   - Main specs: `openspec validate --specs`
   - Archived changes: `openspec validate --archived`
   - All: `openspec validate --all`
+
 

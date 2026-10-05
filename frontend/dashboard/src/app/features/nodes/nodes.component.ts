@@ -4,15 +4,17 @@ import { MatTableModule } from '@angular/material/table';
 import { MatSortModule } from '@angular/material/sort';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { ApiService } from '../../services/api.service';
-import { Node } from '../../models/api.models';
+import { Node, LiveStatusItem } from '../../models/api.models';
 import {
   StatusPillComponent,
   STATUS_ONLINE,
   STATUS_OFFLINE,
 } from '../../shared/components/status-pill/status-pill.component';
 import { MessageDialogComponent } from './message-dialog/message-dialog.component';
-
 import { TopToolbarComponent } from '../../shared/components/top-toolbar/top-toolbar.component';
+import { LiveControlsComponent } from '../../shared/components/live-controls/live-controls.component';
+
+import { WebSocketService } from '../../services/websocket.service';
 
 @Component({
   selector: 'app-nodes',
@@ -25,6 +27,7 @@ import { TopToolbarComponent } from '../../shared/components/top-toolbar/top-too
     MatDialogModule,
     StatusPillComponent,
     TopToolbarComponent,
+    LiveControlsComponent,
   ],
   templateUrl: './nodes.component.html',
   styleUrl: './nodes.component.scss',
@@ -33,6 +36,7 @@ export class NodesComponent {
   private readonly api = inject(ApiService);
   private readonly dialog = inject(MatDialog, { optional: true });
   private readonly destroyRef = inject(DestroyRef);
+  private readonly wsService = inject(WebSocketService, { optional: true });
 
   readonly STATUS_ONLINE = STATUS_ONLINE;
   readonly STATUS_OFFLINE = STATUS_OFFLINE;
@@ -40,6 +44,7 @@ export class NodesComponent {
   readonly displayedColumns: string[] = [
     'device_id',
     'status',
+    'live',
     'ip_address',
     'capabilities',
     'last_seen',
@@ -48,15 +53,86 @@ export class NodesComponent {
 
   readonly nodesResource = this.api.getNodes();
   readonly statusResource = this.api.getStatus();
+  readonly liveStatusResource = this.api.getLiveStatus();
+
+  readonly isCheckingLive = computed<boolean>(() => {
+    if (this.api.hasCheckedLiveStatus && !this.api.hasCheckedLiveStatus()) return true;
+    return (this.api.isCheckingLiveStatus?.() ?? false) && !this.isLive();
+  });
+  readonly isLive = computed<boolean>(() => {
+    if (this.api.isLiveActive?.()) return true;
+    return (this.liveStatusResource.value() ?? []).length > 0;
+  });
+  readonly activeRateMs = computed<number>(() => {
+    const rate = this.api.activeLiveRateMs?.();
+    if (rate) return rate;
+    const list = this.liveStatusResource.value() ?? [];
+    if (list.length > 0 && list[0].rate_ms > 0) {
+      return list[0].rate_ms;
+    }
+    return 5000;
+  });
+
+  lastRefreshTime = Date.now();
+  lastStatusRefreshTime = Date.now();
+
+  readonly nodesLastSeen = signal<Record<string, string>>({});
 
   constructor() {
+    this.api.reloadStatus?.();
+
     const timer = setInterval(() => {
-      this.nodesResource.reload();
-      this.statusResource.reload();
-    }, 15000);
+      this.checkCadenceRefresh();
+    }, 1000);
     this.destroyRef.onDestroy(() => clearInterval(timer));
+
+    if (this.wsService) {
+      const sub = this.wsService.readings$.subscribe((reading) => {
+        if (reading && reading.device_id && reading.timestamp) {
+          this.nodesLastSeen.update((prev) => ({
+            ...prev,
+            [reading.device_id]: reading.timestamp,
+          }));
+        }
+      });
+      this.destroyRef.onDestroy(() => sub.unsubscribe());
+    }
   }
-  readonly allNodes = computed<Node[]>(() => this.nodesResource.value() ?? []);
+
+  checkCadenceRefresh(now: number = Date.now()): void {
+    const live = this.isLive();
+    const statusVal = this.statusResource.value() ?? this.api.cachedStatus?.();
+    const syncIntervalMs = (statusVal?.poller?.interval_s ?? 300) * 1000;
+
+    // Perform /api/status request on every Sync Interval refresh
+    if (now - this.lastStatusRefreshTime >= syncIntervalMs) {
+      this.lastStatusRefreshTime = now;
+      this.statusResource.reload();
+    }
+
+    const intervalMs = live ? this.activeRateMs() : syncIntervalMs;
+    if (now - this.lastRefreshTime >= intervalMs) {
+      this.lastRefreshTime = now;
+      this.nodesResource.reload();
+      this.liveStatusResource.reload();
+      if (!live) {
+        this.statusResource.reload();
+        this.lastStatusRefreshTime = now;
+      }
+    }
+  }
+  readonly allNodes = computed<Node[]>(() => {
+    const raw = this.nodesResource.value() ?? [];
+    const overrides = this.nodesLastSeen();
+    return raw.map((node) => {
+      const liveSeen = overrides[node.device_id];
+      if (liveSeen && liveSeen !== node.last_seen) {
+        return { ...node, last_seen: liveSeen };
+      }
+      return node;
+    });
+  });
+
   readonly isLoading = computed<boolean>(
     () => this.nodesResource.isLoading() || this.statusResource.isLoading()
   );
@@ -101,9 +177,31 @@ export class NodesComponent {
     return Array.isArray(node.capabilities) && node.capabilities.includes('display');
   }
 
-  async refresh(): Promise<void> {
-    await this.api.refresh([this.nodesResource, this.statusResource]);
+  readonly liveMap = computed(() => {
+    const serviceItems = this.api.liveStatusItems?.() ?? [];
+    const list = serviceItems.length > 0 ? serviceItems : (this.liveStatusResource.value() ?? []);
+    const map = new Map<string, LiveStatusItem>();
+    for (const item of list) {
+      map.set(item.device_id, item);
+    }
+    return map;
+  });
+
+  getLiveStatus(node: Node): LiveStatusItem | undefined {
+    return this.liveMap().get(node.device_id);
   }
+
+  onLiveChanged(): void {
+    this.lastRefreshTime = Date.now();
+    this.liveStatusResource.reload();
+    this.nodesResource.reload();
+  }
+
+  async refresh(): Promise<void> {
+    this.lastRefreshTime = Date.now();
+    await this.api.refresh([this.nodesResource, this.statusResource, this.liveStatusResource]);
+  }
+
 
   openMessageDialog(node: Node): void {
     if (this.dialog) {

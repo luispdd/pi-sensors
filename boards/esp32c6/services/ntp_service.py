@@ -26,13 +26,18 @@ def get_utc_date_str():
         return "1970-01-01"
 
 
-def get_utc_iso_timestamp():
-    """Returns the current UTC ISO-8601 string 'YYYY-MM-DDTHH:MM:SS'."""
+def format_iso_timestamp(secs=None):
+    """Formats epoch seconds (or current RTC time) into UTC ISO-8601 string 'YYYY-MM-DDTHH:MM:SS'."""
     try:
-        t = time.localtime()
+        t = time.localtime(secs) if secs is not None else time.localtime()
         return f"{t[0]:04d}-{t[1]:02d}-{t[2]:02d}T{t[3]:02d}:{t[4]:02d}:{t[5]:02d}"
     except Exception:
         return "1970-01-01T00:00:00"
+
+
+def get_utc_iso_timestamp():
+    """Returns the current UTC ISO-8601 string 'YYYY-MM-DDTHH:MM:SS'."""
+    return format_iso_timestamp()
 
 
 def sync_ntp(host=None):
@@ -106,27 +111,49 @@ class NTPTracker:
         return False
 
 
-async def run_ntp_task(app_state):
-    """Synchronizes NTP clock on boot once WiFi is connected, and periodically."""
+async def run_ntp_task(app_state, sync_interval_s=300):
+    """Maintains board internal timestamp by ticking every second, and synchronizes NTP periodically (default every 5 minutes)."""
     try:
         import uasyncio as asyncio
     except ImportError:
         import asyncio
 
-    ntp_tracker = NTPTracker()
+    last_sync = 0
+    # Anchor initial time if needed
+    if getattr(app_state, "_current_epoch", None) is None:
+        try:
+            if hasattr(app_state, "set_time"):
+                app_state.set_time(time.time(), synced=False)
+        except Exception:
+            pass
+
     while True:
         try:
+            now = time.time()
             if getattr(app_state, "wifi_status", None) == "connected":
-                if not getattr(app_state, "ntp_synced", False):
+                if not getattr(app_state, "ntp_synced", False) or (now - last_sync >= sync_interval_s):
                     success, res = sync_ntp()
                     if success:
-                        app_state.ntp_synced = True
-                        print(f"[ntp] NTP sync successful: {res}")
+                        last_sync = time.time()
+                        if hasattr(app_state, "set_time"):
+                            app_state.set_time(last_sync, synced=True)
+                        if hasattr(app_state, "log_ntp_time_str"):
+                            app_state.log_ntp_time_str = res
+                        print(f"[ntp] NTP sync successful ({res}), anchor epoch: {last_sync}")
+                        # Take periodic measurement aligned with NTP sync
+                        if hasattr(app_state, "read_registered_sensors"):
+                            try:
+                                app_state.read_registered_sensors()
+                            except Exception as e:
+                                print(f"[ntp] Error taking aligned sensor reading: {e}")
                     else:
                         print(f"[ntp] NTP sync failed: {res}")
-                else:
-                    ntp_tracker.check_and_resync(app_state)
-            await asyncio.sleep(10.0 if not getattr(app_state, "ntp_synced", False) else 60.0)
+
+            # Internal execution loop ticks the timestamp by 1 second on each tick
+            if hasattr(app_state, "tick_timestamp"):
+                app_state.tick_timestamp(1)
+
+            await asyncio.sleep(1.0)
         except Exception as e:
-            print(f"[ntp] Error in ntp task: {e}")
-            await asyncio.sleep(30.0)
+            print(f"[ntp] Error in timekeeper task: {e}")
+            await asyncio.sleep(1.0)

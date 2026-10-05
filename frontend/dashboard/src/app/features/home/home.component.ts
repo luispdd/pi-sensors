@@ -1,4 +1,4 @@
-import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, effect, inject, signal } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { ChartComponent } from 'ng-apexcharts';
@@ -14,6 +14,7 @@ import {
   ApexFill,
 } from 'ng-apexcharts';
 import { ApiService } from '../../services/api.service';
+import { WebSocketService } from '../../services/websocket.service';
 import {
   BOARD_PALETTE,
   groupByDevice,
@@ -38,6 +39,7 @@ import {
 } from '../../shared/components/status-pill/status-pill.component';
 
 import { TopToolbarComponent } from '../../shared/components/top-toolbar/top-toolbar.component';
+import { LiveControlsComponent } from '../../shared/components/live-controls/live-controls.component';
 import { computedUptime, formatRemainingTime } from '../../shared/utils/formatters';
 import { getThemeColor } from '../../shared/utils/theme.utils';
 import { CapabilitiesService, MetricOption } from '../../services/capabilities.service';
@@ -54,6 +56,13 @@ export const HOME_COUNT_OPTIONS: readonly CountOption[] = [
   { label: '200', value: 200 },
   { label: 'All', value: null },
 ] as const;
+
+export const HOME_FILTER_STORAGE_KEY = 'pi-sensors:home-filter';
+
+export interface HomeFilterState {
+  metric: string;
+  count: number | null;
+}
 
 export interface DashboardChartOptions {
   series: ApexAxisChartSeries;
@@ -78,6 +87,7 @@ export interface DashboardChartOptions {
     ChartComponent,
     StatusPillComponent,
     TopToolbarComponent,
+    LiveControlsComponent,
   ],
   templateUrl: './home.component.html',
   styleUrl: './home.component.scss',
@@ -86,6 +96,7 @@ export class HomeComponent {
   private readonly api = inject(ApiService);
   private readonly capabilitiesService = inject(CapabilitiesService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly wsService = inject(WebSocketService, { optional: true });
 
   readonly STATUS_ONLINE = STATUS_ONLINE;
   readonly STATUS_OFFLINE = STATUS_OFFLINE;
@@ -97,8 +108,46 @@ export class HomeComponent {
   readonly SYNC_STATUS_PARTIAL = SYNC_STATUS_PARTIAL;
   readonly SYNC_STATUS_BUSY = SYNC_STATUS_BUSY;
 
+  private loadSavedFilters(): HomeFilterState | null {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const item = window.localStorage.getItem(HOME_FILTER_STORAGE_KEY);
+        if (item) {
+          const parsed = JSON.parse(item);
+          if (parsed && typeof parsed === 'object') {
+            const rawMetric = parsed.metric ?? parsed.selectedMetric;
+            const rawCount = parsed.count !== undefined ? parsed.count : parsed.limit;
+            return {
+              metric: typeof rawMetric === 'string' ? rawMetric : METRIC_TEMPERATURE,
+              count: typeof rawCount === 'number' || rawCount === null ? rawCount : 50,
+            };
+          }
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return null;
+  }
+
+  private saveFilters(): void {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const state: HomeFilterState = {
+          metric: this.selectedMetric(),
+          count: this.selectedCount(),
+        };
+        window.localStorage.setItem(HOME_FILTER_STORAGE_KEY, JSON.stringify(state));
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  private readonly savedFilter = this.loadSavedFilters();
+
   readonly metrics = this.capabilitiesService.metrics;
-  readonly selectedMetric = signal<string>(METRIC_TEMPERATURE);
+  readonly selectedMetric = signal<string>(this.savedFilter?.metric ?? METRIC_TEMPERATURE);
 
   readonly currentMetricConfig = computed<MetricOption>(() =>
     this.capabilitiesService.getMetricConfig(this.selectedMetric())
@@ -106,13 +155,17 @@ export class HomeComponent {
 
   selectMetric(metric: string): void {
     this.selectedMetric.set(metric);
+    this.saveFilters();
   }
 
   readonly countOptions = HOME_COUNT_OPTIONS;
-  readonly selectedCount = signal<number | null>(50);
+  readonly selectedCount = signal<number | null>(
+    this.savedFilter?.count !== undefined ? this.savedFilter.count : 50
+  );
 
   selectCount(count: number | null): void {
     this.selectedCount.set(count);
+    this.saveFilters();
   }
 
   readonly statusResource = this.api.getStatus();
@@ -122,10 +175,16 @@ export class HomeComponent {
     return limit !== null ? { limit } : undefined;
   });
 
+  readonly liveReadings = signal<Reading[]>([]);
+  readonly liveCount = signal<number>(0);
+  readonly nodesLastSeen = signal<Record<string, string>>({});
+
   readonly now = signal<number>(Date.now());
   private isAutoRefreshing = false;
 
   constructor() {
+    this.api.reloadStatus?.();
+
     const tickTimer = setInterval(() => {
       const currentTime = Date.now();
       this.now.set(currentTime);
@@ -134,13 +193,49 @@ export class HomeComponent {
     this.destroyRef.onDestroy(() => {
       clearInterval(tickTimer);
     });
+
+    if (this.wsService) {
+      const sub = this.wsService.readings$.subscribe((reading) => {
+        this.handleIncomingReading(reading);
+      });
+      this.destroyRef.onDestroy(() => sub.unsubscribe());
+    }
+
+    effect(() => {
+      const _m = this.selectedMetric();
+      const _c = this.selectedCount();
+      this.saveFilters();
+    });
+  }
+
+  handleIncomingReading(reading: Reading): void {
+    if (!reading || !reading.metrics || typeof reading.metrics !== 'object') {
+      return;
+    }
+
+    this.liveReadings.update((prev) => {
+      const idx = prev.findIndex((r) => r.device_id === reading.device_id && r.timestamp === reading.timestamp);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = reading;
+        return copy;
+      }
+      return [...prev, reading];
+    });
+
+    this.liveCount.update((c) => c + 1);
+
+    this.nodesLastSeen.update((prev) => ({
+      ...prev,
+      [reading.device_id]: reading.timestamp,
+    }));
   }
 
   private checkAutoRefresh(currentTime: number): void {
     const statusVal = this.status();
     const intervalSec = statusVal?.poller?.interval_s ?? 300;
     const intervalMs = intervalSec * 1000;
-    const lastSyncStr = statusVal?.poller?.last_sync;
+    const lastSyncStr = this.lastSyncTime();
     const lastRefresh = this.api.lastRefreshTimestamp();
 
     let baseTimeMs = lastRefresh;
@@ -165,9 +260,47 @@ export class HomeComponent {
     }
   }
 
-  readonly status = computed(() => this.statusResource.value());
-  readonly nodes = computed<Node[]>(() => this.nodesResource.value() ?? []);
-  readonly readings = computed<Reading[]>(() => this.readingsResource.value() ?? []);
+  readonly status = computed(() => {
+    return this.api.systemStatus?.() ?? this.statusResource.value() ?? this.api.cachedStatus?.();
+  });
+  readonly nodes = computed<Node[]>(() => {
+    const raw = this.nodesResource.value() ?? [];
+    const overrides = this.nodesLastSeen();
+    return raw.map((node) => {
+      const liveSeen = overrides[node.device_id];
+      if (liveSeen && liveSeen !== node.last_seen) {
+        return { ...node, last_seen: liveSeen };
+      }
+      return node;
+    });
+  });
+
+  readonly allReadings = computed<Reading[]>(() => {
+    const fetched = this.readingsResource.value() ?? [];
+    const live = this.liveReadings();
+    if (live.length === 0) {
+      return fetched;
+    }
+    const map = new Map<string, Reading>();
+    for (const r of fetched) {
+      map.set(`${r.device_id}:${r.timestamp}`, r);
+    }
+    for (const r of live) {
+      map.set(`${r.device_id}:${r.timestamp}`, r);
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  });
+
+  readonly readings = computed<Reading[]>(() => {
+    const all = this.allReadings();
+    const limit = this.selectedCount();
+    if (limit !== null && all.length > limit) {
+      return all.slice(all.length - limit);
+    }
+    return all;
+  });
 
   readonly hasError = computed(
     () => !!(this.statusResource.error?.() || this.nodesResource.error?.() || this.readingsResource.error?.())
@@ -193,12 +326,16 @@ export class HomeComponent {
 
   reloadAll(): void {
     this.api.lastRefreshTimestamp.set(Date.now());
+    this.liveReadings.set([]);
+    this.liveCount.set(0);
     this.statusResource.reload();
     this.nodesResource.reload();
     this.readingsResource.reload();
   }
 
-  readonly totalRecords = computed(() => this.status()?.database?.total_readings ?? 0);
+  readonly totalRecords = computed(
+    () => (this.status()?.database?.total_readings ?? 0) + this.liveCount()
+  );
   readonly totalNodesCount = computed(() => this.nodes().length);
   readonly onlineNodesCount = computed(() => this.nodes().filter((n) => this.isOnline(n)).length);
   readonly topNodes = computed(() => this.nodes().slice(0, 5));
@@ -212,7 +349,17 @@ export class HomeComponent {
     return SYNC_STATUS_OFFLINE;
   });
 
-  readonly lastSyncTime = computed(() => this.status()?.poller?.last_sync ?? null);
+  readonly lastSyncTime = computed<string | null>(() => {
+    const poller = this.status()?.poller;
+    if (poller?.last_sync) {
+      return poller.last_sync;
+    }
+    const res = poller?.last_result;
+    if (res && typeof res === 'object' && 'completed_at' in res && typeof res['completed_at'] === 'string') {
+      return res['completed_at'];
+    }
+    return null;
+  });
 
   readonly lastSyncTimeFormatted = computed(() => {
     const timeStr = this.lastSyncTime();
@@ -244,7 +391,7 @@ export class HomeComponent {
     const statusVal = this.status();
     const intervalSec = statusVal?.poller?.interval_s ?? 300;
     const intervalMs = intervalSec * 1000;
-    const lastSyncStr = statusVal?.poller?.last_sync;
+    const lastSyncStr = this.lastSyncTime();
     const lastRefresh = this.api.lastRefreshTimestamp();
     const now = this.now();
 
